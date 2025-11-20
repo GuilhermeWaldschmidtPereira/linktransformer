@@ -3,10 +3,10 @@
 import json
 import os
 import warnings
-
+import faiss
 import numpy as np
 import pandas as pd
-import faiss
+import svs
 from typing import Union, List, Optional, Tuple,Dict, Any
 from pandas import DataFrame
 
@@ -16,7 +16,7 @@ from linktransformer.utils import *
 from sklearn.metrics.pairwise import cosine_similarity
 from itertools import combinations
 from transformers import TrainingArguments, Trainer
-
+from linktransformer.main_svs import VamanaIndexer
 
 
 def merge(
@@ -127,15 +127,19 @@ def merge(
     embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
     embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
     ## Create index
+    
+    class_svs = VamanaIndexer()
+    index = class_svs.build(embeddings1.astype(np.float32), ef_construction=200, M=16)
+    
+    print(index)
+    
     index = faiss.IndexFlatIP(embeddings1.shape[1])
 
     ## Add to index depending on merge type
     index.add(embeddings2)
 
-
     ## Search index
     D, I = index.search(embeddings1, 1)
-  
 
     ## Check nearest neighbor of the first text in df1 as a test
     df1 = df1.reset_index(drop=True)
@@ -535,8 +539,6 @@ def all_pair_combos_evaluate(df: DataFrame,
 
     return df_concat
 
-
-
 def merge_knn(
     df1: DataFrame,
     df2: DataFrame,
@@ -669,6 +671,147 @@ def merge_knn(
 
     print(f"LM matched on key columns - left: {left_on}{suffixes[0]}, right: {right_on}{suffixes[1]}")
         
+
+    return df_lm_matched
+
+
+def merge_knn2(
+    df1: DataFrame,
+    df2: DataFrame,
+    on: Optional[Union[str, List[str]]] = None,
+    model: Union[str, LinkTransformer] = "all-MiniLM-L6-v2",
+    left_on: Optional[Union[str, List[str]]] = None,
+    right_on: Optional[Union[str, List[str]]] = None,
+    k: int = 1,
+    suffixes: Tuple[str, str] = ("_x", "_y"),
+    batch_size: int = 128,
+    openai_key: Optional[str] = None,
+    drop_sim_threshold: float = None,
+) -> DataFrame:
+    """
+    Merge two dataframes using language model embeddings. This function would support k nearest neighbors matching for each row in df1.
+    Merge is a special case of this function when k=1.
+    :param df1 (DataFrame): First dataframe (left).
+    :param df2 (DataFrame): Second dataframe (right).
+    :param on (Union[str, List[str]], optional): Column(s) to join on in df1. Defaults to None.
+    :param model (str): Language model to use.
+    :param left_on (Union[str, List[str]], optional): Column(s) to join on in df1. Defaults to None.
+    :param right_on (Union[str, List[str]], optional): Column(s) to join on in df2. Defaults to None.
+    :param k (int): Number of nearest neighbors to match for each row in df1. Defaults to 1.
+    :param suffixes (Tuple[str, str]): Suffixes to use for overlapping columns. Defaults to ('_x', '_y').
+    :param batch_size (int): Batch size for inferencing embeddings. Defaults to 128.
+    :param openai_key (str, optional): OpenAI API key for InferKit API. Defaults to None.
+    :param drop_sim_threshold (float, optional): Drop rows with similarity below this threshold. Defaults to None.
+    :return: DataFrame: The merged dataframe.
+    """
+
+
+    ## Set common columns as on if not specified
+    if on is None:
+        on = list(set(df1.columns).intersection(set(df2.columns)))
+
+    ## If left_on or right_on is not specified, set it to on
+    if left_on is None:
+        left_on = on
+    if right_on is None:
+        right_on = on
+
+    on = None
+
+
+    df1 = df1.copy()
+    df2 = df2.copy()
+    ## give ids to each df
+    ##Ensure that there is no id_lt column in df1 or df2
+    if "id_lt" in df1.columns:
+        raise ValueError(f"Column id_lt already exists in df1, please rename it to proceed")
+    if "id_lt" in df2.columns:
+        raise ValueError(f"Column id_lt already exists in df2,please rename it to proceed")
+
+    df1.loc[:, "id_lt"] = np.arange(len(df1))
+    df2.loc[:, "id_lt"] = np.arange(len(df2))
+
+    if isinstance(right_on, list):
+        strings_right = serialize_columns(df2, right_on, model=model)
+    if isinstance(left_on, list):
+        strings_left = serialize_columns(df1, left_on, model=model)
+    else:
+        strings_left = df1[left_on].tolist()
+        strings_right = df2[right_on].tolist()
+    
+    ## Load the model
+    if isinstance(model, str):
+        if openai_key is None:
+            model = load_model(model)
+
+
+    ## Infer embeddings for df1
+    embeddings1 = infer_embeddings(strings_left, model, batch_size=batch_size, openai_key=openai_key, return_numpy= True)
+    ## Infer embeddings for df2
+    embeddings2 = infer_embeddings(strings_right, model, batch_size=batch_size, openai_key=openai_key,return_numpy= True)
+
+
+    ### Expand dim if embeddings are 1d (numpy)
+    if len(embeddings1.shape) == 1:
+        embeddings1 = np.expand_dims(embeddings1, axis=0)
+    if len(embeddings2.shape) == 1:
+        embeddings2 = np.expand_dims(embeddings2, axis=0)
+
+
+    
+    ## Concatenate embeddings if needed (example: combining features)
+    # If you want to use both embeddings together, concatenate them
+    # embeddings_combined = np.concatenate([embeddings1, embeddings2], axis=1)
+    
+    class_svs = VamanaIndexer()
+    
+    index = class_svs.build(
+    base_embeddings=embeddings1,
+    reduced_dims=128,                  # projeção para 128D
+    graph_max_degree=64,               # M (grau máximo do grafo)
+    window_size=128,                   # janela para construção
+    distance=svs.DistanceType.L2,      # métrica L2
+    num_threads=4,                     # paralelismo
+    primary_kind=svs.LeanVecKind.lvq4,
+    secondary_kind=svs.LeanVecKind.lvq8,
+)
+    
+    
+    # print(class_svs.search(embeddings2, k=1))
+    # exit()
+
+    print("Searching index")
+
+    I, D = index.search(embeddings2, k)
+
+    ## Check nearest neighbor of the first text in df1 as a test
+    df1 = df1.reset_index(drop=True)
+    df2 = df2.reset_index(drop=True)
+    
+    ## Fuzzily merge the dfs based on the faiss index queries
+    ###Each I sublst is a list of k nearest neighbors for each row in df1 in terms of indices of df2
+    ###We need to expand the rows of df1 and df2 to match the number of rows in df1
+    ###We also need to expand the scores to match the number of rows in df1
+    ###First, expand the rows of df1
+    df1_expanded = df1.loc[np.repeat(df1.index.values, k)].reset_index(drop=True)
+    ###Now, expand the rows of df2
+    df2_expanded = df2.iloc[I.flatten()].reset_index(drop=True)
+    
+    print(df1_expanded)
+    print(df2_expanded)
+
+    ###Now, merge the expanded dfs
+    df_lm_matched = df1_expanded.merge(df2_expanded, left_index=True, right_index=True, how="inner",suffixes=suffixes)
+
+    ### Add score column
+    df_lm_matched["score"] =  D.flatten()      
+        
+
+    if drop_sim_threshold is not None:
+        df_lm_matched = df_lm_matched[df_lm_matched["score"]>=drop_sim_threshold]
+        print(f"Dropped rows with similarity below {drop_sim_threshold}")
+
+    print(f"LM matched on key columns - left: {left_on}{suffixes[0]}, right: {right_on}{suffixes[1]}")
 
     return df_lm_matched
 
