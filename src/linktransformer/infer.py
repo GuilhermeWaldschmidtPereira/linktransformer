@@ -9,6 +9,7 @@ import pandas as pd
 import svs
 from typing import Union, List, Optional, Tuple,Dict, Any
 from pandas import DataFrame
+from julia import Julia, Main
 
 from linktransformer.cluster_fns import cluster
 # from linktransformer.utils import serialize_columns, infer_embeddings, load_model, load_clf, cosine_similarity_corresponding_pairs, tokenize_data_for_inference, predict_rows_with_openai
@@ -757,12 +758,6 @@ def merge_knn2(
     if len(embeddings2.shape) == 1:
         embeddings2 = np.expand_dims(embeddings2, axis=0)
 
-
-    
-    ## Concatenate embeddings if needed (example: combining features)
-    # If you want to use both embeddings together, concatenate them
-    # embeddings_combined = np.concatenate([embeddings1, embeddings2], axis=1)
-    
     class_svs = VamanaIndexer()
     
     index = class_svs.build(
@@ -775,12 +770,6 @@ def merge_knn2(
     primary_kind=svs.LeanVecKind.lvq4,
     secondary_kind=svs.LeanVecKind.lvq8,
 )
-    
-    
-    # print(class_svs.search(embeddings2, k=1))
-    # exit()
-
-    print("Searching index")
 
     I, D = index.search(embeddings2, k)
 
@@ -934,3 +923,77 @@ def classify_rows(
             df[f"clf_preds_{'-'.join(on)}"] = preds
 
     return df
+
+
+def merge_knn_hnsw_julia(
+    df1: DataFrame,
+    df2: DataFrame,
+    on: Optional[Union[str, List[str]]] = None,
+    model: Union[str, LinkTransformer] = "all-MiniLM-L6-v2",
+    left_on: Optional[Union[str, List[str]]] = None,
+    right_on: Optional[Union[str, List[str]]] = None,
+    k: int = 1,
+    suffixes: Tuple[str, str] = ("_x", "_y"),
+    batch_size: int = 128,
+    openai_key: Optional[str] = None,
+    drop_sim_threshold: float = None,
+) -> DataFrame:
+    """
+    Merge two dataframes using language model embeddings. This function would support k nearest neighbors matching for each row in df1.
+    Merge is a special case of this function when k=1.
+    :param df1 (DataFrame): First dataframe (left).
+    :param df2 (DataFrame): Second dataframe (right).
+    :param on (Union[str, List[str]], optional): Column(s) to join on in df1. Defaults to None.
+    :param model (str): Language model to use.
+    :param left_on (Union[str, List[str]], optional): Column(s) to join on in df1. Defaults to None.
+    :param right_on (Union[str, List[str]], optional): Column(s) to join on in df2. Defaults to None.
+    :param k (int): Number of nearest neighbors to match for each row in df1. Defaults to 1.
+    :param suffixes (Tuple[str, str]): Suffixes to use for overlapping columns. Defaults to ('_x', '_y').
+    :param batch_size (int): Batch size for inferencing embeddings. Defaults to 128.
+    :param openai_key (str, optional): OpenAI API key for InferKit API. Defaults to None.
+    :param drop_sim_threshold (float, optional): Drop rows with similarity below this threshold. Defaults to None.
+    :return: DataFrame: The merged dataframe.
+    """
+    
+    Main.include("hnsw_wrapper.jl")
+    idxs_jl, dists_jl = Main.run_hnsw("768d_uniform_data_0.npy", "768d_uniform_queries_0.npy")
+
+
+    ## Set common columns as on if not specified
+    if on is None:
+        on = list(set(df1.columns).intersection(set(df2.columns)))
+
+    ## If left_on or right_on is not specified, set it to on
+    if left_on is None:
+        left_on = on
+    if right_on is None:
+        right_on = on
+
+    on = None
+
+
+    df1 = df1.copy()
+    df2 = df2.copy()
+    ## give ids to each df
+    ##Ensure that there is no id_lt column in df1 or df2
+    if "id_lt" in df1.columns:
+        raise ValueError(f"Column id_lt already exists in df1, please rename it to proceed")
+    if "id_lt" in df2.columns:
+        raise ValueError(f"Column id_lt already exists in df2,please rename it to proceed")
+
+    df1.loc[:, "id_lt"] = np.arange(len(df1))
+    df2.loc[:, "id_lt"] = np.arange(len(df2))
+
+    if isinstance(right_on, list):
+        strings_right = serialize_columns(df2, right_on, model=model)
+    if isinstance(left_on, list):
+        strings_left = serialize_columns(df1, left_on, model=model)
+    else:
+        strings_left = df1[left_on].tolist()
+        strings_right = df2[right_on].tolist()
+    
+    ## Load the model
+    if isinstance(model, str):
+        if openai_key is None:
+            model = load_model(model)
+

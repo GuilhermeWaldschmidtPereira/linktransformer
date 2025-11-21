@@ -16,7 +16,7 @@ if SRC_DIR not in sys.path:
     sys.path.append(SRC_DIR)
 
 # Agora podemos importar direto do arquivo infer.py
-from linktransformer.infer import merge_knn, merge_knn2
+from linktransformer.infer import merge_knn_hnsw_julia
 
 
 def main():
@@ -51,7 +51,7 @@ def main():
     #           drop_sim_threshold=None)
     #
     # Aqui vou deixar merge_type no default ('1:1') e só setar o essencial.
-    merged = merge_knn2(
+    merged = merge_knn_hnsw_julia(
         df1=df_base,
         df2=df_query,
         on=None,
