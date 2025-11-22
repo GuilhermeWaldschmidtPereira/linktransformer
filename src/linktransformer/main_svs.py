@@ -53,10 +53,10 @@ class VamanaIndexer:
         reduced_dims: int = 128,
         graph_max_degree: int = 64,
         window_size: int = 128,
-        distance: svs.DistanceType = svs.DistanceType.L2,
+        distance: 'l2',
         num_threads: int = 4,
-        primary_kind: svs.LeanVecKind = svs.LeanVecKind.lvq4,
-        secondary_kind: svs.LeanVecKind = svs.LeanVecKind.lvq8,
+        primary_kind: 'lvq4',
+        secondary_kind: 'lvq8',
     ) -> None:
         """
         Constrói o índice Vamana a partir dos embeddings da base (N x D).

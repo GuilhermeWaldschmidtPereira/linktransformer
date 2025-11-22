@@ -954,10 +954,6 @@ def merge_knn_hnsw_julia(
     :param drop_sim_threshold (float, optional): Drop rows with similarity below this threshold. Defaults to None.
     :return: DataFrame: The merged dataframe.
     """
-    
-    Main.include("hnsw_wrapper.jl")
-    idxs_jl, dists_jl = Main.run_hnsw("768d_uniform_data_0.npy", "768d_uniform_queries_0.npy")
-
 
     ## Set common columns as on if not specified
     if on is None:
@@ -997,3 +993,56 @@ def merge_knn_hnsw_julia(
         if openai_key is None:
             model = load_model(model)
 
+
+    ## Infer embeddings for df1
+    embeddings1 = infer_embeddings(strings_left, model, batch_size=batch_size, openai_key=openai_key, return_numpy= True)
+    ## Infer embeddings for df2
+    embeddings2 = infer_embeddings(strings_right, model, batch_size=batch_size, openai_key=openai_key,return_numpy= True)
+
+
+    ### Expand dim if embeddings are 1d (numpy)
+    if len(embeddings1.shape) == 1:
+        embeddings1 = np.expand_dims(embeddings1, axis=0)
+    if len(embeddings2.shape) == 1:
+        embeddings2 = np.expand_dims(embeddings2, axis=0)
+
+        
+
+    ## Normalize embedding tensors using numpy
+    embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
+    embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
+    
+    Main.include("hnsw_wrapper.jl")
+    I,D = Main.run_hnsw(embeddings1, embeddings2)
+    I = I-1
+    ## Check nearest neighbor of the first text in df1 as a test
+    df1 = df1.reset_index(drop=True)
+    df2 = df2.reset_index(drop=True)
+
+    ## Fuzzily merge the dfs based on the faiss index queries
+    ###Each I sublst is a list of k nearest neighbors for each row in df1 in terms of indices of df2
+    ###We need to expand the rows of df1 and df2 to match the number of rows in df1
+    ###We also need to expand the scores to match the number of rows in df1
+
+    ###First, expand the rows of df1
+    df1_expanded = df1.loc[np.repeat(df1.index.values, k)].reset_index(drop=True)
+    ###Now, expand the rows of df2
+    df2_expanded = df2.iloc[I.flatten()].reset_index(drop=True)
+
+    ###Now, merge the expanded dfs
+    df_lm_matched = df1_expanded.merge(df2_expanded, left_index=True, right_index=True, how="inner",suffixes=suffixes)
+
+    ### Add score column
+    df_lm_matched["score"] =  D.flatten()
+
+        
+        
+
+    if drop_sim_threshold is not None:
+        df_lm_matched = df_lm_matched[df_lm_matched["score"]>=drop_sim_threshold]
+        print(f"Dropped rows with similarity below {drop_sim_threshold}")
+
+    print(f"LM matched on key columns - left: {left_on}{suffixes[0]}, right: {right_on}{suffixes[1]}")
+        
+
+    return df_lm_matched
