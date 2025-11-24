@@ -44,12 +44,7 @@ def main():
     # 3) Chamar merge_knn diretamente
     #    (sem usar 'import linktransformer as lt')
     # ==========================================
-    # ATENÇÃO: assinatura do merge_knn em infer.py (versão atual upstream)
-    # merge_knn(df1, df2, merge_type='1:1', on=None, model='all-MiniLM-L6-v2',
-    #           left_on=None, right_on=None, k=1, suffixes=('_x', '_y'),
-    #           use_gpu=False, batch_size=128, openai_key=None,
-    #           drop_sim_threshold=None)
-    #
+    
     # Aqui vou deixar merge_type no default ('1:1') e só setar o essencial.
     merged = merge_knn_hnsw_julia(
         df1=df_base,

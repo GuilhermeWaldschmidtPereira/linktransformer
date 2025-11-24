@@ -1,0 +1,2 @@
+metodo,index_time,search_time,total_time,num_rows_df1,num_rows_df2,k
+hnsw_julia,0.677945613861084,1.685233333333333e-05,0.6779624661944174,10,10,1

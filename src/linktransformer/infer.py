@@ -18,6 +18,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from itertools import combinations
 from transformers import TrainingArguments, Trainer
 from linktransformer.main_svs import VamanaIndexer
+import time
 
 
 def merge(
@@ -760,18 +761,26 @@ def merge_knn2(
 
     class_svs = VamanaIndexer()
     
+    # Medir tempo de indexação
+    start_index_time = time.time()
     index = class_svs.build(
-    base_embeddings=embeddings1,
-    reduced_dims=128,                  # projeção para 128D
-    graph_max_degree=64,               # M (grau máximo do grafo)
-    window_size=128,                   # janela para construção
-    distance=svs.DistanceType.L2,      # métrica L2
-    num_threads=4,                     # paralelismo
-    primary_kind=svs.LeanVecKind.lvq4,
-    secondary_kind=svs.LeanVecKind.lvq8,
-)
+        base_embeddings=embeddings1,
+        reduced_dims=128,                  # projeção para 128D
+        graph_max_degree=64,               # M (grau máximo do grafo)
+        window_size=128,                   # janela para construção
+        distance=svs.DistanceType.L2,      # métrica L2
+        num_threads=4,                     # paralelismo
+        primary_kind=svs.LeanVecKind.lvq4,
+        secondary_kind=svs.LeanVecKind.lvq8,
+    )
+    index_time = time.time() - start_index_time
+    print(f"Tempo de indexação: {index_time:.4f} segundos")
 
+    # Medir tempo de busca
+    start_search_time = time.time()
     I, D = index.search(embeddings2, k)
+    search_time = time.time() - start_search_time
+    print(f"Tempo de busca: {search_time:.4f} segundos")
 
     ## Check nearest neighbor of the first text in df1 as a test
     df1 = df1.reset_index(drop=True)
@@ -1012,9 +1021,13 @@ def merge_knn_hnsw_julia(
     embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
     embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
     
-    Main.include("hnsw_wrapper.jl")
+    Main.include("hnsw_julia/hnsw_wrapper.jl")
     # 1) Construir o índice uma vez
+
+    start_time = time.time()
     hnsw = Main.build_hnsw(embeddings1)
+    tempo_criacao = time.time() - start_time
+    print(f"Tempo de criação do índice: {tempo_criacao} segundos")
 
     soma_tempo_busca = 0
     num_execucoes = 3
@@ -1053,6 +1066,30 @@ def merge_knn_hnsw_julia(
         print(f"Dropped rows with similarity below {drop_sim_threshold}")
 
     print(f"LM matched on key columns - left: {left_on}{suffixes[0]}, right: {right_on}{suffixes[1]}")
+
+    # Save timing results to CSV
+    results_file = "resultados.csv"
+    total_time = soma_tempo_busca/num_execucoes + tempo_criacao
+
+    # Create results dataframe
+    results_data = {
+        "metodo": ["hnsw_julia"],
+        "index_time": [tempo_criacao],
+        "search_time": [soma_tempo_busca/num_execucoes],
+        "total_time": [total_time],
+        "num_rows_df1": [len(df1)],
+        "num_rows_df2": [len(df2)],
+        "k": [k]
+    }
+    results_df = pd.DataFrame(results_data)
+
+    # Append to CSV file
+    if os.path.exists(results_file):
+        results_df.to_csv(results_file, mode='a', header=False, index=False)
+    else:
+        results_df.to_csv(results_file, mode='w', header=True, index=False)
+
+    print(f"Results saved to {results_file}")
         
 
     return df_lm_matched

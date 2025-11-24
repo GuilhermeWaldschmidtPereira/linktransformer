@@ -12,7 +12,6 @@ historicjapanese/**
 extra_data/**
 un_data/**
 wiki_aliases_copy/**
-*.csv
 /docs/build
 /docs/_build
 **.pt
