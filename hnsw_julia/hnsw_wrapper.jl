@@ -33,11 +33,58 @@ function matrix_to_vecs(arr::AbstractMatrix)
     return data, n, d
 end
 
+"Constrói o índice HNSW e o retorna."
+function build_hnsw(
+    base_arr::AbstractMatrix;
+    M::Int = M_DEFAULT,
+    ef_constr::Int = EF_CONSTR_DEFAULT,
+    ef_search::Int = EF_SEARCH_DEFAULT,
+)
+    println("=== Construindo índice HNSW (arrays em memória) ===")
+    base_data, nb, dim = matrix_to_vecs(base_arr)
+    println("Base: $nb vetores, dimensão = $dim")
+
+    t_build = @elapsed begin
+        hnsw = HierarchicalNSW(
+            base_data;
+            metric = Euclidean(),
+            M = M,
+            efConstruction = ef_constr,
+            ef = ef_search,
+        )
+        add_to_graph!(hnsw)
+    end
+    println("Índice HNSW construído. Tempo de construção = $(t_build) s\n")
+
+    return hnsw
+end
+
+"Faz busca k-NN usando um índice HNSW já construído."
+function search_hnsw(
+    hnsw::HierarchicalNSW,
+    query_arr::AbstractMatrix;
+    K::Int = K_DEFAULT,
+)
+    println("=== Buscando em índice HNSW ===")
+    queries_data, nq, dim_q = matrix_to_vecs(query_arr)
+    println("Queries: $nq vetores, dimensão = $dim_q")
+
+    t_search = @elapsed begin
+        idxs, dists = knn_search(hnsw, queries_data, K)
+        # Converte Vector{Vector{T}} em Matrix (nq × K)
+        global idxs_mat  = reduce(hcat, idxs)'
+        global dists_mat = reduce(hcat, dists)'
+    end
+    println("Buscas k-NN concluídas. Tempo de busca = $(t_search) s\n")
+
+    return idxs_mat, dists_mat, t_search
+end
+
 """
+Convenience: mantém a interface antiga
 run_hnsw(base_arr, query_arr; ...)
 
-Versão que recebe as matrizes de embeddings diretamente,
-sem ler de disco.
+– constrói o índice e já faz a busca.
 """
 function run_hnsw(
     base_arr::AbstractMatrix,
@@ -47,97 +94,13 @@ function run_hnsw(
     ef_constr::Int = EF_CONSTR_DEFAULT,
     ef_search::Int = EF_SEARCH_DEFAULT,
 )
-    println("=== HNSW.jl para embeddings (arrays em memória) ===")
-
-    # 1. Base
-    base_data, nb, dim = matrix_to_vecs(base_arr)
-    println("Base carregada em memória: $nb vetores, dimensão = $dim")
-
-    # 2. Queries
-    queries_data = nothing
     if query_arr === nothing
-        println("Usando 10 vetores da própria base como queries.")
+        println("Query não fornecida; usando 10 vetores da própria base como queries.")
+        nb = size(base_arr, 1)
         nq = min(10, nb)
-        queries_data = base_data[1:nq]
-    else
-        queries_data, nq, dim_q = matrix_to_vecs(query_arr)
-        println("Queries em memória: $nq vetores, dimensão = $dim_q")
-        if dim_q != dim
-            error("Dimensão das queries ($dim_q) difere da base ($dim).")
-        end
+        query_arr = base_arr[1:nq, :]
     end
 
-    # 3. Índice HNSW
-    println("\nCriando índice HNSW...")
-    hnsw = HierarchicalNSW(
-        base_data;
-        metric = Euclidean(),
-        M = M,
-        efConstruction = ef_constr,
-        ef = ef_search,
-    )
-    println("Construindo o grafo (add_to_graph!)...")
-    add_to_graph!(hnsw)
-    println("Grafo HNSW construído.\n")
-
-    # 4. Busca k-NN
-    println("Fazendo buscas k-NN para $(length(queries_data)) queries, k = $K ...")
-    idxs, dists = knn_search(hnsw, queries_data, K)
-
-    # Converte Vector{Vector{T}} em Matrix (nq × K)
-    idxs_mat  = reduce(hcat, idxs)'    # cada linha = vizinhos de 1 query
-    dists_mat = reduce(hcat, dists)'
-
-    return idxs_mat, dists_mat
-end
-
-"""
-Versão antiga (por path) continua valendo se você quiser manter:
-run_hnsw(base_path, query_path; ...)
-"""
-function run_hnsw(
-    base_path::String,
-    query_path::Union{Nothing,String}=nothing;
-    K::Int = K_DEFAULT,
-    M::Int = M_DEFAULT,
-    ef_constr::Int = EF_CONSTR_DEFAULT,
-    ef_search::Int = EF_SEARCH_DEFAULT,
-)
-    println("=== HNSW.jl para embeddings (via arquivos .npy) ===")
-
-    base_data, nb, dim = load_npy_as_vectors(base_path)
-    println("Base carregada: $nb vetores, dimensão = $dim")
-
-    queries_data = nothing
-    if query_path === nothing
-        println("Usando 10 vetores da própria base como queries.")
-        nq = min(10, nb)
-        queries_data = base_data[1:nq]
-    else
-        queries_data, nq, dim_q = load_npy_as_vectors(query_path)
-        println("Queries carregadas: $nq vetores, dimensão = $dim_q")
-        if dim_q != dim
-            error("Dimensão das queries ($dim_q) difere da base ($dim).")
-        end
-    end
-
-    println("\nCriando índice HNSW...")
-    hnsw = HierarchicalNSW(
-        base_data;
-        metric = Euclidean(),
-        M = M,
-        efConstruction = ef_constr,
-        ef = ef_search,
-    )
-    println("Construindo o grafo (add_to_graph!)...")
-    add_to_graph!(hnsw)
-    println("Grafo HNSW construído.\n")
-
-    println("Fazendo buscas k-NN para $(length(queries_data)) queries, k = $K ...")
-    idxs, dists = knn_search(hnsw, queries_data, K)
-
-    idxs_mat  = reduce(hcat, idxs)'
-    dists_mat = reduce(hcat, dists)'
-
-    return idxs_mat, dists_mat
+    hnsw = build_hnsw(base_arr; M=M, ef_constr=ef_constr, ef_search=ef_search)
+    return search_hnsw(hnsw, query_arr; K=K)
 end

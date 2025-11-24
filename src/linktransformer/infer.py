@@ -1013,7 +1013,16 @@ def merge_knn_hnsw_julia(
     embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
     
     Main.include("hnsw_wrapper.jl")
-    I,D = Main.run_hnsw(embeddings1, embeddings2)
+    # 1) Construir o índice uma vez
+    hnsw = Main.build_hnsw(embeddings1)
+
+    soma_tempo_busca = 0
+    num_execucoes = 3
+    for i in range(num_execucoes):
+        # 2) Realizar buscas repetidamente e medir o tempo
+        I, D, tempo_busca = Main.search_hnsw(hnsw, embeddings2) 
+        soma_tempo_busca += tempo_busca
+    
     I = I-1
     ## Check nearest neighbor of the first text in df1 as a test
     df1 = df1.reset_index(drop=True)
@@ -1034,6 +1043,7 @@ def merge_knn_hnsw_julia(
 
     ### Add score column
     df_lm_matched["score"] =  D.flatten()
+    print(f"Tempo médio de busca: {soma_tempo_busca/num_execucoes} segundos")
 
         
         
