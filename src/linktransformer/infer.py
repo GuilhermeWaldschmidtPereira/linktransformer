@@ -776,11 +776,14 @@ def merge_knn2(
     index_time = time.time() - start_index_time
     print(f"Tempo de indexação: {index_time:.4f} segundos")
 
-    # Medir tempo de busca
-    start_search_time = time.time()
-    I, D = index.search(embeddings2, k)
-    search_time = time.time() - start_search_time
-    print(f"Tempo de busca: {search_time:.4f} segundos")
+    num_execucoes = 3
+    soma_tempo_busca = 0
+
+    for i in range(num_execucoes):
+        start_search_time = time.time()
+        I, D = index.search(embeddings2, k)
+        search_time = time.time() - start_search_time
+        soma_tempo_busca += search_time
 
     ## Check nearest neighbor of the first text in df1 as a test
     df1 = df1.reset_index(drop=True)
@@ -810,6 +813,31 @@ def merge_knn2(
         print(f"Dropped rows with similarity below {drop_sim_threshold}")
 
     print(f"LM matched on key columns - left: {left_on}{suffixes[0]}, right: {right_on}{suffixes[1]}")
+
+
+    # Save timing results to CSV
+    results_file = "resultados.csv"
+    total_time = soma_tempo_busca/num_execucoes + index_time
+
+    # Create results dataframe
+    results_data = {
+        "metodo": ["svs_knn"],
+        "index_time": [index_time],
+        "search_time": [soma_tempo_busca/num_execucoes],
+        "total_time": [total_time],
+        "num_rows_df1": [len(df1)],
+        "num_rows_df2": [len(df2)],
+        "k": [k]
+    }
+    results_df = pd.DataFrame(results_data)
+
+    # Append to CSV file
+    if os.path.exists(results_file):
+        results_df.to_csv(results_file, mode='a', header=False, index=False)
+    else:
+        results_df.to_csv(results_file, mode='w', header=True, index=False)
+
+    print(f"Results saved to {results_file}")
 
     return df_lm_matched
 
@@ -1090,6 +1118,6 @@ def merge_knn_hnsw_julia(
         results_df.to_csv(results_file, mode='w', header=True, index=False)
 
     print(f"Results saved to {results_file}")
-        
+
 
     return df_lm_matched
