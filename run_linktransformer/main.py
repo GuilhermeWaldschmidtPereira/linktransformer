@@ -15,6 +15,7 @@ if SRC_DIR not in sys.path:
 
 # Agora podemos importar direto do arquivo infer.py
 from linktransformer.infer import merge_knn, merge_knn2
+import argparse
 
 
 def main():
