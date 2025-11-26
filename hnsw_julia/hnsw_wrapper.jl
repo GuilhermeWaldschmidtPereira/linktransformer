@@ -4,8 +4,8 @@ using NPZ
 
 const K_DEFAULT         = 1
 const M_DEFAULT         = 16
-const EF_CONSTR_DEFAULT = 200
-const EF_SEARCH_DEFAULT = 50
+const EF_CONSTR_DEFAULT = 100
+const EF_SEARCH_DEFAULT = 40
 
 # continua existindo se ainda quiser carregar de .npy via NPZ
 function load_npy_as_vectors(path::String)
@@ -65,9 +65,7 @@ function search_hnsw(
     query_arr::AbstractMatrix;
     K::Int = K_DEFAULT,
 )
-    println("=== Buscando em índice HNSW ===")
     queries_data, nq, dim_q = matrix_to_vecs(query_arr)
-    println("Queries: $nq vetores, dimensão = $dim_q")
 
     t_search = @elapsed begin
         idxs, dists = knn_search(hnsw, queries_data, K)
@@ -75,7 +73,6 @@ function search_hnsw(
         global idxs_mat  = reduce(hcat, idxs)'
         global dists_mat = reduce(hcat, dists)'
     end
-    println("Buscas k-NN concluídas. Tempo de busca = $(t_search) s\n")
 
     return idxs_mat, dists_mat, t_search
 end

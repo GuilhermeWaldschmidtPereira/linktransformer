@@ -102,7 +102,7 @@ class VamanaIndexer:
         self,
         query_embeddings: np.ndarray,
         *,
-        k: int = 10,
+        k: int = 1,
         search_window_size: int = 50,
         num_threads: int = 4,
     ) -> Tuple[np.ndarray, np.ndarray]:
