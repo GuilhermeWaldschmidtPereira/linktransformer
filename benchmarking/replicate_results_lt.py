@@ -15,7 +15,7 @@ from linktransformer.infer import  evaluate_pairs
 from hyperopt import fmin, tpe, hp
 from time import time
 import json
-import wandb
+#import wandb
 import editdistance
 from tqdm import tqdm
 

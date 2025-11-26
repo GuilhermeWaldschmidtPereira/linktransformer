@@ -11,7 +11,7 @@ import sklearn
 from datasets import load_dataset, DatasetDict
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, TrainingArguments, Trainer
 import evaluate
-import wandb
+#import wandb
 import sklearn.model_selection
 from typing import Tuple, List, Union
 

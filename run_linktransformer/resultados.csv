@@ -1,0 +1,2 @@
+metodo,index_time,search_time,total_time,num_rows_df1,num_rows_df2,k
+scann_knn,0.006250858306884766,0.00015195210774739584,0.006402810414632161,10,10,1

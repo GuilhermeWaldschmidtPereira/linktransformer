@@ -1,8 +1,6 @@
 from itertools import combinations
 from sklearn.cluster import AgglomerativeClustering, DBSCAN
 import networkx as nx
-import hdbscan
-
 
 def cluster(cluster_type, cluster_params, corpus_embeddings, corpus_ids=None):
     # Define default values for each cluster type

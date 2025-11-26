@@ -6,7 +6,7 @@ from typing import List
 from sentence_transformers import evaluation, LoggingHandler
 import logging
 from transformers.utils import logging as lg
-import wandb
+##import wandb
 from typing import List, Dict, Set, Callable
 from torch import Tensor
 

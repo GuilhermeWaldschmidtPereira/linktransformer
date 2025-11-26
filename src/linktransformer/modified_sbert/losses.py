@@ -4,7 +4,6 @@ import torch.nn as nn
 from sentence_transformers import LoggingHandler, losses, SentenceTransformer
 import logging
 from transformers.utils import logging as lg
-import wandb
 from torch import Tensor
 from torch.nn import functional as F
 from typing import Dict,Iterable

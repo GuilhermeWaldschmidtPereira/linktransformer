@@ -21,5 +21,3 @@ python-jl hnsw_julia/run_linktransformer_hnsw_julia.py
 python-jl run_linktransformer/main.py
 
 python-jl run_linktransformer/main_nmslib.py
-
-# python-jl run_linktransformer/main_scann.py

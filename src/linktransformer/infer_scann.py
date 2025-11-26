@@ -1,15 +1,16 @@
-###Inference and Linkage script
-###We want to link dfs together using embeddings
+### Inference and Linkage script
+### We want to link dfs together using embeddings
+
 import os
+import time
+from typing import Union, List, Optional, Tuple
+
 import numpy as np
 import pandas as pd
-from typing import Union, List, Optional, Tuple
 from pandas import DataFrame
 
-from linktransformer.cluster_fns import cluster
 from linktransformer.utils import *
-from sklearn.metrics.pairwise import cosine_similarity
-import time
+
 
 def merge_knn_scann(
     df1: DataFrame,
@@ -31,6 +32,8 @@ def merge_knn_scann(
     - df1 gera as queries.
     - ScaNN usa dot_product em embeddings normalizados.
     - Tempos de index/search são salvos em resultados.csv.
+
+    Implementação sem sklearn, compatível com numpy>=2.
     """
 
     # -------------------------
@@ -44,6 +47,7 @@ def merge_knn_scann(
     if right_on is None:
         right_on = on
 
+    # não usamos mais "on" diretamente
     on = None
 
     df1 = df1.copy()
@@ -62,6 +66,7 @@ def merge_knn_scann(
     if isinstance(left_on, list):
         strings_left = serialize_columns(df1, left_on, model=model)
     else:
+        # caso simples: uma única coluna em cada lado
         strings_left = df1[left_on].tolist()
         strings_right = df2[right_on].tolist()
 
@@ -73,16 +78,18 @@ def merge_knn_scann(
             model = load_model(model)
 
     embeddings1 = infer_embeddings(
-        strings_left, model,
+        strings_left,
+        model,
         batch_size=batch_size,
         openai_key=openai_key,
-        return_numpy=True
+        return_numpy=True,
     )
     embeddings2 = infer_embeddings(
-        strings_right, model,
+        strings_right,
+        model,
         batch_size=batch_size,
         openai_key=openai_key,
-        return_numpy=True
+        return_numpy=True,
     )
 
     if len(embeddings1.shape) == 1:
@@ -90,38 +97,61 @@ def merge_knn_scann(
     if len(embeddings2.shape) == 1:
         embeddings2 = np.expand_dims(embeddings2, axis=0)
 
-    # Normaliza embeddings -> ScaNN com "dot_product" vira cosine-like
+    # Normaliza embeddings -> ScaNN com "dot_product" ~ cosine similarity
     embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
     embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
 
     # -------------------------
-    # 3) Construir índice ScaNN
+    # 3) Construir índice ScaNN (modo adaptativo)
     # -------------------------
     import scann
 
     start_index_time = time.time()
 
-    # Aqui você pode ajustar hiperparâmetros conforme o tamanho da base.
-    # Para bases pequenas, isso é meio overkill, mas mantém a mesma forma.
-    searcher = (
-        scann.scann_ops_pybind.builder(
-            embeddings2,          # base indexada (df2)
-            k,                    # número de vizinhos
-            "dot_product",        # métrica
-        )
-        .tree(
-            num_leaves=2000,
-            num_leaves_to_search=100,
-        )
-        .score_ah(
-            2, anisotropic_quantization_threshold=0.2,
-        )
-        .reorder(100)
-        .build()
+    n_points = embeddings2.shape[0]
+
+    # parâmetros "base" pensados para bases grandes
+    base_num_leaves = 2000
+    base_num_leaves_to_search = 100
+
+    # adapta ao tamanho real
+    num_leaves = max(min(base_num_leaves, n_points), 1)
+    num_leaves_to_search = min(base_num_leaves_to_search, num_leaves)
+
+    builder = scann.scann_ops_pybind.builder(
+        embeddings2,      # base indexada (df2)
+        k,                # número de vizinhos
+        "dot_product",    # métrica
     )
 
+    usa_tree = n_points > 1
+    usa_ah = n_points >= 64  # só ativa asymmetric hashing em bases razoavelmente grandes
+
+    if usa_tree:
+        builder = builder.tree(
+            num_leaves=num_leaves,
+            num_leaves_to_search=num_leaves_to_search,
+        )
+
+    # EXATAMENTE 1 entre score_ah e score_brute_force
+    if usa_ah:
+        builder = builder.score_ah(
+            2,
+            anisotropic_quantization_threshold=0.2,
+        ).reorder(100)
+    else:
+        # brute force + reorder (reorder aqui é redundante, mas mantém a assinatura)
+        builder = builder.score_brute_force().reorder(100)
+
+    searcher = builder.build()
+
     index_time = time.time() - start_index_time
-    print(f"Tempo de criação do índice (ScaNN): {index_time:.6f} segundos")
+    print(
+        f"[ScaNN] índice criado em {index_time:.6f} s | "
+        f"n_points={n_points}, num_leaves={num_leaves}, "
+        f"num_leaves_to_search={num_leaves_to_search}, "
+        f"usa_tree={usa_tree}, usa_AH={usa_ah}"
+    )
 
     # -------------------------
     # 4) Buscar k-NN com ScaNN
@@ -142,11 +172,10 @@ def merge_knn_scann(
         soma_tempo_busca += search_time
 
     avg_search_time = soma_tempo_busca / num_execucoes
-    print(f"Tempo médio de busca (ScaNN) em {num_execucoes} execuções: {avg_search_time:.6f} segundos")
-
-    # D já são scores de similaridade (dot product) – maior = mais similar.
-    # shape: (nq, k)
-    # I: índices em df2
+    print(
+        f"[ScaNN] tempo médio de busca em {num_execucoes} execuções: "
+        f"{avg_search_time:.6f} s"
+    )
 
     # -------------------------
     # 5) Merge fuzzy com os DataFrames

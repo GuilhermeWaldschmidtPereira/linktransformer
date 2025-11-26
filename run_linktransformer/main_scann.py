@@ -16,8 +16,7 @@ if SRC_DIR not in sys.path:
     sys.path.append(SRC_DIR)
 
 # Agora podemos importar direto do arquivo infer.py
-from linktransformer.infer_Scann import merge_knn_scann
-
+from linktransformer.infer_scann import merge_knn_scann
 
 def main():
     # ==========================================
