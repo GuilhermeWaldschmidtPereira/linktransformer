@@ -557,20 +557,7 @@ def merge_knn(
     """
     Merge two dataframes using language model embeddings. This function would support k nearest neighbors matching for each row in df1.
     Merge is a special case of this function when k=1.
-    :param df1 (DataFrame): First dataframe (left).
-    :param df2 (DataFrame): Second dataframe (right).
-    :param on (Union[str, List[str]], optional): Column(s) to join on in df1. Defaults to None.
-    :param model (str): Language model to use.
-    :param left_on (Union[str, List[str]], optional): Column(s) to join on in df1. Defaults to None.
-    :param right_on (Union[str, List[str]], optional): Column(s) to join on in df2. Defaults to None.
-    :param k (int): Number of nearest neighbors to match for each row in df1. Defaults to 1.
-    :param suffixes (Tuple[str, str]): Suffixes to use for overlapping columns. Defaults to ('_x', '_y').
-    :param batch_size (int): Batch size for inferencing embeddings. Defaults to 128.
-    :param openai_key (str, optional): OpenAI API key for InferKit API. Defaults to None.
-    :param drop_sim_threshold (float, optional): Drop rows with similarity below this threshold. Defaults to None.
-    :return: DataFrame: The merged dataframe.
     """
-
 
     ## Set common columns as on if not specified
     if on is None:
@@ -584,15 +571,14 @@ def merge_knn(
 
     on = None
 
-
     df1 = df1.copy()
     df2 = df2.copy()
     ## give ids to each df
-    ##Ensure that there is no id_lt column in df1 or df2
+    ## Ensure that there is no id_lt column in df1 or df2
     if "id_lt" in df1.columns:
-        raise ValueError(f"Column id_lt already exists in df1, please rename it to proceed")
+        raise ValueError("Column id_lt already exists in df1, please rename it to proceed")
     if "id_lt" in df2.columns:
-        raise ValueError(f"Column id_lt already exists in df2,please rename it to proceed")
+        raise ValueError("Column id_lt already exists in df2, please rename it to proceed")
 
     df1.loc[:, "id_lt"] = np.arange(len(df1))
     df2.loc[:, "id_lt"] = np.arange(len(df2))
@@ -610,12 +596,20 @@ def merge_knn(
         if openai_key is None:
             model = load_model(model)
 
-
     ## Infer embeddings for df1
-    embeddings1 = infer_embeddings(strings_left, model, batch_size=batch_size, openai_key=openai_key, return_numpy= True)
+    embeddings1 = infer_embeddings(
+        strings_left, model,
+        batch_size=batch_size,
+        openai_key=openai_key,
+        return_numpy=True
+    )
     ## Infer embeddings for df2
-    embeddings2 = infer_embeddings(strings_right, model, batch_size=batch_size, openai_key=openai_key,return_numpy= True)
-
+    embeddings2 = infer_embeddings(
+        strings_right, model,
+        batch_size=batch_size,
+        openai_key=openai_key,
+        return_numpy=True
+    )
 
     ### Expand dim if embeddings are 1d (numpy)
     if len(embeddings1.shape) == 1:
@@ -623,58 +617,100 @@ def merge_knn(
     if len(embeddings2.shape) == 1:
         embeddings2 = np.expand_dims(embeddings2, axis=0)
 
-        
-
     ## Normalize embedding tensors using numpy
     embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
     embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
 
-
-
-    ## Create index
+    # ================================
+    #     INDEXAÇÃO (FAISS)
+    # ================================
+    # Medir tempo de criação do índice + add
+    start_index_time = time.time()
     index = faiss.IndexFlatIP(embeddings1.shape[1])
-    
     print("Adding embeddings to index")
-
-
     index.add(embeddings2)
+    index_time = time.time() - start_index_time
+    print(f"Tempo de indexação (FAISS): {index_time:.4f} segundos")
+
+    # ================================
+    #     BUSCA KNN (FAISS)
+    # ================================
+    num_execucoes = 3
+    soma_tempo_busca = 0.0
+    D = None
+    I = None
 
     print("Searching index")
+    for i in range(num_execucoes):
+        start_search_time = time.time()
+        D, I = index.search(embeddings1, k)
+        search_time = time.time() - start_search_time
+        soma_tempo_busca += search_time
 
-    D, I = index.search(embeddings1, k)
-
+    avg_search_time = soma_tempo_busca / num_execucoes
+    print(f"Tempo médio de busca (FAISS) em {num_execucoes} execuções: {avg_search_time:.4f} segundos")
 
     ## Check nearest neighbor of the first text in df1 as a test
     df1 = df1.reset_index(drop=True)
     df2 = df2.reset_index(drop=True)
 
     ## Fuzzily merge the dfs based on the faiss index queries
-    ###Each I sublst is a list of k nearest neighbors for each row in df1 in terms of indices of df2
-    ###We need to expand the rows of df1 and df2 to match the number of rows in df1
-    ###We also need to expand the scores to match the number of rows in df1
+    ### Each I sublst is a list of k nearest neighbors for each row in df1 in terms of indices of df2
+    ### We need to expand the rows of df1 and df2 to match the number of rows in df1
+    ### We also need to expand the scores to match the number of rows in df1
 
-    ###First, expand the rows of df1
+    ### First, expand the rows of df1
     df1_expanded = df1.loc[np.repeat(df1.index.values, k)].reset_index(drop=True)
-    ###Now, expand the rows of df2
+    ### Now, expand the rows of df2
     df2_expanded = df2.iloc[I.flatten()].reset_index(drop=True)
 
-    ###Now, merge the expanded dfs
-    df_lm_matched = df1_expanded.merge(df2_expanded, left_index=True, right_index=True, how="inner",suffixes=suffixes)
+    ### Now, merge the expanded dfs
+    df_lm_matched = df1_expanded.merge(
+        df2_expanded,
+        left_index=True,
+        right_index=True,
+        how="inner",
+        suffixes=suffixes,
+    )
 
     ### Add score column
-    df_lm_matched["score"] =  D.flatten()
-
-        
-        
+    df_lm_matched["score"] = D.flatten()
 
     if drop_sim_threshold is not None:
-        df_lm_matched = df_lm_matched[df_lm_matched["score"]>=drop_sim_threshold]
+        df_lm_matched = df_lm_matched[df_lm_matched["score"] >= drop_sim_threshold]
         print(f"Dropped rows with similarity below {drop_sim_threshold}")
 
-    print(f"LM matched on key columns - left: {left_on}{suffixes[0]}, right: {right_on}{suffixes[1]}")
-        
+    print(
+        f"LM matched on key columns - left: {left_on}{suffixes[0]}, "
+        f"right: {right_on}{suffixes[1]}"
+    )
+
+    # ================================
+    #   SALVAR RESULTADOS DE TEMPO
+    # ================================
+    results_file = "resultados.csv"
+    total_time = index_time + avg_search_time
+
+    results_data = {
+        "metodo": ["faiss_knn"],
+        "index_time": [index_time],
+        "search_time": [avg_search_time],
+        "total_time": [total_time],
+        "num_rows_df1": [len(df1)],
+        "num_rows_df2": [len(df2)],
+        "k": [k],
+    }
+    results_df = pd.DataFrame(results_data)
+
+    if os.path.exists(results_file):
+        results_df.to_csv(results_file, mode="a", header=False, index=False)
+    else:
+        results_df.to_csv(results_file, mode="w", header=True, index=False)
+
+    print(f"Resultados (FAISS) salvos em {results_file}")
 
     return df_lm_matched
+
 
 
 def merge_knn2(
@@ -1119,5 +1155,390 @@ def merge_knn_hnsw_julia(
 
     print(f"Results saved to {results_file}")
 
+
+    return df_lm_matched
+
+def merge_knn_nmslib(
+    df1: DataFrame,
+    df2: DataFrame,
+    on: Optional[Union[str, List[str]]] = None,
+    model: Union[str, LinkTransformer] = "all-MiniLM-L6-v2",
+    left_on: Optional[Union[str, List[str]]] = None,
+    right_on: Optional[Union[str, List[str]]] = None,
+    k: int = 1,
+    suffixes: Tuple[str, str] = ("_x", "_y"),
+    batch_size: int = 128,
+    openai_key: Optional[str] = None,
+    drop_sim_threshold: float = None,
+) -> DataFrame:
+    """
+    Merge two dataframes using language model embeddings and NMSLIB (HNSW).
+    k-NN é feito com NMSLIB, e tempos de index/search são salvos em resultados.csv.
+    """
+
+    # -------------------------
+    # 1) Preparar colunas e IDs
+    # -------------------------
+    if on is None:
+        on = list(set(df1.columns).intersection(set(df2.columns)))
+
+    if left_on is None:
+        left_on = on
+    if right_on is None:
+        right_on = on
+
+    on = None
+
+    df1 = df1.copy()
+    df2 = df2.copy()
+
+    if "id_lt" in df1.columns:
+        raise ValueError("Column id_lt already exists in df1, please rename it to proceed")
+    if "id_lt" in df2.columns:
+        raise ValueError("Column id_lt already exists in df2, please rename it to proceed")
+
+    df1.loc[:, "id_lt"] = np.arange(len(df1))
+    df2.loc[:, "id_lt"] = np.arange(len(df2))
+
+    if isinstance(right_on, list):
+        strings_right = serialize_columns(df2, right_on, model=model)
+    if isinstance(left_on, list):
+        strings_left = serialize_columns(df1, left_on, model=model)
+    else:
+        strings_left = df1[left_on].tolist()
+        strings_right = df2[right_on].tolist()
+
+    # -------------------------
+    # 2) Carregar modelo e embeddings
+    # -------------------------
+    if isinstance(model, str):
+        if openai_key is None:
+            model = load_model(model)
+
+    embeddings1 = infer_embeddings(
+        strings_left, model,
+        batch_size=batch_size,
+        openai_key=openai_key,
+        return_numpy=True
+    )
+    embeddings2 = infer_embeddings(
+        strings_right, model,
+        batch_size=batch_size,
+        openai_key=openai_key,
+        return_numpy=True
+    )
+
+    if len(embeddings1.shape) == 1:
+        embeddings1 = np.expand_dims(embeddings1, axis=0)
+    if len(embeddings2.shape) == 1:
+        embeddings2 = np.expand_dims(embeddings2, axis=0)
+
+    # Normaliza (como você fez nos outros métodos)
+    embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
+    embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
+
+    # -------------------------
+    # 3) Construir índice NMSLIB (HNSW)
+    # -------------------------
+    # Vamos usar espaço de similaridade de cosseno
+    # NMSLIB retorna "distâncias" (menor = mais similar).
+    import nmslib
+
+    start_index_time = time.time()
+
+    index = nmslib.init(
+        space="cosinesimil",   # coerente com embeddings normalizados
+        method="hnsw"
+    )
+
+    # adiciona vetores de df2 (candidatos)
+    index.addDataPointBatch(embeddings2)
+
+    # parâmetros de construção do grafo HNSW
+    index.createIndex(
+        {
+            "M": 16,                 # grau máximo
+            "efConstruction": 200,   # similar ao ef_construction
+        },
+        print_progress=False,
+    )
+
+    index_time = time.time() - start_index_time
+    print(f"Tempo de criação do índice (NMSLIB HNSW): {index_time:.6f} segundos")
+
+    # parâmetros de busca (efSearch)
+    index.setQueryTimeParams({"efSearch": 50})
+
+    # -------------------------
+    # 4) Buscar k-NN com NMSLIB
+    # -------------------------
+    num_execucoes = 3
+    soma_tempo_busca = 0.0
+    neighbors = None
+    distances = None
+
+    for i in range(num_execucoes):
+        start_search_time = time.time()
+        # knnQueryBatch retorna lista de (indices, distâncias) para cada query
+        res = index.knnQueryBatch(embeddings1, k=k)
+        search_time = time.time() - start_search_time
+        soma_tempo_busca += search_time
+
+        # guarda o último resultado
+        neighbors, distances = zip(*res)
+
+    avg_search_time = soma_tempo_busca / num_execucoes
+    print(f"Tempo médio de busca (NMSLIB HNSW) em {num_execucoes} execuções: {avg_search_time:.6f} segundos")
+
+    # Converte para arrays (nq × k)
+    I = np.vstack(neighbors)      # indices dos vizinhos em df2
+    D_dist = np.vstack(distances) # distâncias (cosine distance)
+
+    # Converter distâncias em "score" tipo similaridade (maior = melhor)
+    # cosinesimil distance ~ (1 - cos_sim) para vetores unitários
+    score_sim = 1.0 - D_dist
+
+    # -------------------------
+    # 5) Merge fuzzy com os DataFrames
+    # -------------------------
+    df1 = df1.reset_index(drop=True)
+    df2 = df2.reset_index(drop=True)
+
+    df1_expanded = df1.loc[np.repeat(df1.index.values, k)].reset_index(drop=True)
+    df2_expanded = df2.iloc[I.flatten()].reset_index(drop=True)
+
+    df_lm_matched = df1_expanded.merge(
+        df2_expanded,
+        left_index=True,
+        right_index=True,
+        how="inner",
+        suffixes=suffixes,
+    )
+
+    df_lm_matched["score"] = score_sim.flatten()
+
+    if drop_sim_threshold is not None:
+        df_lm_matched = df_lm_matched[df_lm_matched["score"] >= drop_sim_threshold]
+        print(f"Dropped rows with similarity below {drop_sim_threshold}")
+
+    print(
+        f"LM matched on key columns - left: {left_on}{suffixes[0]}, "
+        f"right: {right_on}{suffixes[1]}"
+    )
+
+    # -------------------------
+    # 6) Salvar tempos em resultados.csv
+    # -------------------------
+    results_file = "resultados.csv"
+    total_time = index_time + avg_search_time
+
+    results_data = {
+        "metodo": ["nmslib_hnsw"],
+        "index_time": [index_time],
+        "search_time": [avg_search_time],
+        "total_time": [total_time],
+        "num_rows_df1": [len(df1)],
+        "num_rows_df2": [len(df2)],
+        "k": [k],
+    }
+    results_df = pd.DataFrame(results_data)
+
+    if os.path.exists(results_file):
+        results_df.to_csv(results_file, mode="a", header=False, index=False)
+    else:
+        results_df.to_csv(results_file, mode="w", header=True, index=False)
+
+    print(f"Results (NMSLIB HNSW) saved to {results_file}")
+
+    return df_lm_matched
+
+def merge_knn_scann(
+    df1: DataFrame,
+    df2: DataFrame,
+    on: Optional[Union[str, List[str]]] = None,
+    model: Union[str, LinkTransformer] = "all-MiniLM-L6-v2",
+    left_on: Optional[Union[str, List[str]]] = None,
+    right_on: Optional[Union[str, List[str]]] = None,
+    k: int = 1,
+    suffixes: Tuple[str, str] = ("_x", "_y"),
+    batch_size: int = 128,
+    openai_key: Optional[str] = None,
+    drop_sim_threshold: float = None,
+) -> DataFrame:
+    """
+    Merge two dataframes using language model embeddings and ScaNN as k-NN index.
+
+    - df2 vira a base indexada (database).
+    - df1 gera as queries.
+    - ScaNN usa dot_product em embeddings normalizados.
+    - Tempos de index/search são salvos em resultados.csv.
+    """
+
+    # -------------------------
+    # 1) Preparar colunas e IDs
+    # -------------------------
+    if on is None:
+        on = list(set(df1.columns).intersection(set(df2.columns)))
+
+    if left_on is None:
+        left_on = on
+    if right_on is None:
+        right_on = on
+
+    on = None
+
+    df1 = df1.copy()
+    df2 = df2.copy()
+
+    if "id_lt" in df1.columns:
+        raise ValueError("Column id_lt already exists in df1, please rename it to proceed")
+    if "id_lt" in df2.columns:
+        raise ValueError("Column id_lt already exists in df2, please rename it to proceed")
+
+    df1.loc[:, "id_lt"] = np.arange(len(df1))
+    df2.loc[:, "id_lt"] = np.arange(len(df2))
+
+    if isinstance(right_on, list):
+        strings_right = serialize_columns(df2, right_on, model=model)
+    if isinstance(left_on, list):
+        strings_left = serialize_columns(df1, left_on, model=model)
+    else:
+        strings_left = df1[left_on].tolist()
+        strings_right = df2[right_on].tolist()
+
+    # -------------------------
+    # 2) Carregar modelo e embeddings
+    # -------------------------
+    if isinstance(model, str):
+        if openai_key is None:
+            model = load_model(model)
+
+    embeddings1 = infer_embeddings(
+        strings_left, model,
+        batch_size=batch_size,
+        openai_key=openai_key,
+        return_numpy=True
+    )
+    embeddings2 = infer_embeddings(
+        strings_right, model,
+        batch_size=batch_size,
+        openai_key=openai_key,
+        return_numpy=True
+    )
+
+    if len(embeddings1.shape) == 1:
+        embeddings1 = np.expand_dims(embeddings1, axis=0)
+    if len(embeddings2.shape) == 1:
+        embeddings2 = np.expand_dims(embeddings2, axis=0)
+
+    # Normaliza embeddings -> ScaNN com "dot_product" vira cosine-like
+    embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
+    embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
+
+    # -------------------------
+    # 3) Construir índice ScaNN
+    # -------------------------
+    import scann
+
+    start_index_time = time.time()
+
+    # Aqui você pode ajustar hiperparâmetros conforme o tamanho da base.
+    # Para bases pequenas, isso é meio overkill, mas mantém a mesma forma.
+    searcher = (
+        scann.scann_ops_pybind.builder(
+            embeddings2,          # base indexada (df2)
+            k,                    # número de vizinhos
+            "dot_product",        # métrica
+        )
+        .tree(
+            num_leaves=2000,
+            num_leaves_to_search=100,
+        )
+        .score_ah(
+            2, anisotropic_quantization_threshold=0.2,
+        )
+        .reorder(100)
+        .build()
+    )
+
+    index_time = time.time() - start_index_time
+    print(f"Tempo de criação do índice (ScaNN): {index_time:.6f} segundos")
+
+    # -------------------------
+    # 4) Buscar k-NN com ScaNN
+    # -------------------------
+    num_execucoes = 3
+    soma_tempo_busca = 0.0
+    I = None
+    D = None
+
+    for i in range(num_execucoes):
+        start_search_time = time.time()
+        # search_batched retorna (neighbors, distances/scores)
+        I, D = searcher.search_batched(
+            embeddings1,
+            final_num_neighbors=k,
+        )
+        search_time = time.time() - start_search_time
+        soma_tempo_busca += search_time
+
+    avg_search_time = soma_tempo_busca / num_execucoes
+    print(f"Tempo médio de busca (ScaNN) em {num_execucoes} execuções: {avg_search_time:.6f} segundos")
+
+    # D já são scores de similaridade (dot product) – maior = mais similar.
+    # shape: (nq, k)
+    # I: índices em df2
+
+    # -------------------------
+    # 5) Merge fuzzy com os DataFrames
+    # -------------------------
+    df1 = df1.reset_index(drop=True)
+    df2 = df2.reset_index(drop=True)
+
+    df1_expanded = df1.loc[np.repeat(df1.index.values, k)].reset_index(drop=True)
+    df2_expanded = df2.iloc[I.flatten()].reset_index(drop=True)
+
+    df_lm_matched = df1_expanded.merge(
+        df2_expanded,
+        left_index=True,
+        right_index=True,
+        how="inner",
+        suffixes=suffixes,
+    )
+
+    df_lm_matched["score"] = D.flatten()  # dot-product similarity
+
+    if drop_sim_threshold is not None:
+        df_lm_matched = df_lm_matched[df_lm_matched["score"] >= drop_sim_threshold]
+        print(f"Dropped rows with similarity below {drop_sim_threshold}")
+
+    print(
+        f"LM matched on key columns - left: {left_on}{suffixes[0]}, "
+        f"right: {right_on}{suffixes[1]}"
+    )
+
+    # -------------------------
+    # 6) Salvar tempos em resultados.csv
+    # -------------------------
+    results_file = "resultados.csv"
+    total_time = index_time + avg_search_time
+
+    results_data = {
+        "metodo": ["scann_knn"],
+        "index_time": [index_time],
+        "search_time": [avg_search_time],
+        "total_time": [total_time],
+        "num_rows_df1": [len(df1)],
+        "num_rows_df2": [len(df2)],
+        "k": [k],
+    }
+    results_df = pd.DataFrame(results_data)
+
+    if os.path.exists(results_file):
+        results_df.to_csv(results_file, mode="a", header=False, index=False)
+    else:
+        results_df.to_csv(results_file, mode="w", header=True, index=False)
+
+    print(f"Results (ScaNN) saved to {results_file}")
 
     return df_lm_matched

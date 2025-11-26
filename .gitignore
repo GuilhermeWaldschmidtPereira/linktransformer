@@ -27,4 +27,5 @@ wiki_aliases_copy/**
 **clean_protest_models**
 **data_outside_package**
 **archive_to_remove**
-
+venv/
+.venv_scann/
