@@ -7,6 +7,8 @@ from typing import Union, List, Optional
 import numpy as np
 import pandas as pd
 from pandas import DataFrame
+import matplotlib.pyplot as plt
+#import seaborn as sns
 
 
 # ==========================================
@@ -181,6 +183,27 @@ def main():
     merge_knn2(1, df1, df2, suffixes)
     merge_knn_nmslib(1, df1, df2, suffixes)
     merge_knn_hnsw_julia(1, df1, df2, suffixes)
+    
+
+    plot_resultados()
+
+def plot_resultados():
+
+    data_dir = os.path.join(THIS_DIR, "../data")
+    results_path = os.path.join(data_dir, "resultados.csv")
+    if not os.path.exists(results_path):
+        raise FileNotFoundError(f"Não encontrei {results_path}")
+
+    df_results = pd.read_csv(results_path)
+
+    plt.figure(figsize=(10, 6))
+    sns.barplot(x="metodo", y="avg_search_time", data=df_results)
+    plt.title("Tempo Médio de Busca por Método")
+    plt.ylabel("Tempo Médio de Busca (segundos)")
+    plt.xlabel("Método")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
 
 if __name__ == "__main__":
     main()
