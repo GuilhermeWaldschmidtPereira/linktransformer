@@ -11,6 +11,8 @@ from typing import Union, List, Optional, Tuple,Dict, Any
 from pandas import DataFrame
 from julia import Julia, Main
 
+import psutil
+import os
 from linktransformer.cluster_fns import cluster
 # from linktransformer.utils import serialize_columns, infer_embeddings, load_model, load_clf, cosine_similarity_corresponding_pairs, tokenize_data_for_inference, predict_rows_with_openai
 from linktransformer.utils import *
@@ -19,6 +21,7 @@ from itertools import combinations
 from transformers import TrainingArguments, Trainer
 from linktransformer.main_svs import VamanaIndexer
 import time
+import nmslib
 
 def merge_knn(k, df1,df2, suffixes) -> DataFrame:
     # ================================
@@ -30,10 +33,18 @@ def merge_knn(k, df1,df2, suffixes) -> DataFrame:
     embeddings2 = np.load("../data/embeddings_query.npy")
 
     start_index_time = time.time()
+    process = psutil.Process(os.getpid())
+    mem_before = process.memory_info().rss / (1024 ** 2)  # MB
+    
     index = faiss.IndexFlatIP(embeddings1.shape[1])
     print("Adding embeddings to index")
     index.add(embeddings1)
+    
+    mem_after = process.memory_info().rss / (1024 ** 2)  # MB
+    mem_used_create_index = mem_after - mem_before
+    
     index_time = time.time() - start_index_time
+    print(f"Memória utilizada na indexação: {mem_used_create_index:.2f} MB")
     print(f"Tempo de indexação (FAISS): {index_time:.4f} segundos")
 
     # ================================
@@ -43,15 +54,20 @@ def merge_knn(k, df1,df2, suffixes) -> DataFrame:
     soma_tempo_busca = 0.0
     D = None
     I = None
+    soma_qtde_mem = 0.0
 
     print("Searching index")
     for i in range(num_execucoes):
         start_search_time = time.time()
+        mem_before = process.memory_info().rss / (1024 ** 2)  # MB
         D, I = index.search(embeddings2, k)
+        mem_after = process.memory_info().rss / (1024 ** 2)  # MB
+        mem_used_search = mem_after - mem_before
         search_time = time.time() - start_search_time
         soma_tempo_busca += search_time
 
     avg_search_time = soma_tempo_busca / num_execucoes
+    avg_mem_used_search = mem_used_search / num_execucoes
     print(f"Tempo médio de busca (FAISS) em {num_execucoes} execuções: {avg_search_time:.4f} segundos")
 
     ## Check nearest neighbor of the first text in df1 as a test
@@ -103,6 +119,8 @@ def merge_knn(k, df1,df2, suffixes) -> DataFrame:
         "num_rows_df1": [len(df1)],
         "num_rows_df2": [len(df2)],
         "k": [k],
+        "mem_used_indexation_MB": [mem_used_create_index],
+        "avg_mem_used_search_MB": [avg_mem_used_search],
     }
     results_df = pd.DataFrame(results_data)
 
@@ -141,6 +159,9 @@ def merge_knn2(k, df1, df2, suffixes) -> DataFrame:
     #   - df1 gera as queries
     # Logo, indexamos embeddings2 (df2) e consultamos com embeddings1 (df1)
     start_index_time = time.time()
+    process = psutil.Process(os.getpid())
+    mem_before = process.memory_info().rss / (1024 ** 2)  # MB
+    
     index = class_svs.build(
         base_embeddings=embeddings1,        # base indexada (df2)
         reduced_dims=128,                   # projeção para 128D
@@ -151,6 +172,10 @@ def merge_knn2(k, df1, df2, suffixes) -> DataFrame:
         primary_kind=svs.LeanVecKind.lvq4,
         secondary_kind=svs.LeanVecKind.lvq8,
     )
+    
+    mem_after = process.memory_info().rss / (1024 ** 2)  # MB
+    mem_used_create_index = mem_after - mem_before
+    print(f"Memória utilizada na indexação (SVS): {mem_used_create_index:.2f} MB")
     index_time = time.time() - start_index_time
     print(f"Tempo de indexação (SVS): {index_time:.4f} segundos")
 
@@ -159,6 +184,7 @@ def merge_knn2(k, df1, df2, suffixes) -> DataFrame:
     # ================================
     num_execucoes = 100
     soma_tempo_busca = 0.0
+    soma_qtde_mem = 0.0
     I = None
     D = None
 
@@ -166,11 +192,16 @@ def merge_knn2(k, df1, df2, suffixes) -> DataFrame:
     for i in range(num_execucoes):
         start_search_time = time.time()
         # consultas: embeddings1 (df1) procurando em embeddings2 (df2)
+        mem_before = process.memory_info().rss / (1024 ** 2)  # MB
         I, D = index.search(embeddings2, k)
+        mem_after = process.memory_info().rss / (1024 ** 2)  # MB
+        mem_used_search = mem_after - mem_before
+        soma_qtde_mem += mem_used_search
         search_time = time.time() - start_search_time
         soma_tempo_busca += search_time
 
     avg_search_time = soma_tempo_busca / num_execucoes
+    avg_mem_used_search = soma_qtde_mem / num_execucoes
 
     # ================================
     #     MERGE FUZZY
@@ -217,6 +248,8 @@ def merge_knn2(k, df1, df2, suffixes) -> DataFrame:
         "num_rows_df1": [len(df1)],
         "num_rows_df2": [len(df2)],
         "k": [k],
+        "mem_used_indexation_MB": [mem_used_create_index],
+        "avg_mem_used_search_MB": [avg_mem_used_search],
     }
     results_df = pd.DataFrame(results_data)
 
@@ -257,7 +290,14 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes) -> DataFrame:
 
     # Indexar a BASE = df2 / embeddings2, igual ao padrão FAISS/SVS/NMSLIB
     start_index_time = time.time()
+    process = psutil.Process(os.getpid())
+    mem_before = process.memory_info().rss / (1024 ** 2)  # MB
+    
     hnsw = Main.build_hnsw(embeddings1)
+    
+    mem_after = process.memory_info().rss / (1024 ** 2)  # MB
+    mem_used_create_index = mem_after - mem_before
+    print(f"Memória utilizada na indexação (HNSW Julia): {mem_used_create_index:.2f} MB")
     index_time = time.time() - start_index_time
     print(f"Tempo de criação do índice (HNSW Julia): {index_time:.4f} segundos")
 
@@ -268,17 +308,23 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes) -> DataFrame:
     num_execucoes = 100
     I = None
     D = None
+    soma_memoria_usada = 0.0
 
     for i in range(num_execucoes):
         start_search_time = time.time()
         # search_hnsw(hnsw, queries, k)  -> (I, D, tempo_busca)
+        mem_before = process.memory_info().rss / (1024 ** 2)  # MB
         I, D, tempo_busca = Main.search_hnsw(hnsw, embeddings2)
+        mem_after = process.memory_info().rss / (1024 ** 2)  # MB
+        mem_used_search = mem_after - mem_before
+        soma_memoria_usada += mem_used_search
         search_time = time.time() - start_search_time
         soma_tempo_busca += tempo_busca  # ou search_time, se preferir consistência
     # Julia costuma retornar índices 1-based
     I = I - 1
 
     avg_search_time = soma_tempo_busca / num_execucoes
+    avg_mem_used_search = soma_memoria_usada / num_execucoes
     print(f"Tempo médio de busca (HNSW Julia) em {num_execucoes} execuções: {avg_search_time:.4f} segundos")
 
     # ================================
@@ -319,6 +365,8 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes) -> DataFrame:
         "num_rows_df1": [len(df1)],
         "num_rows_df2": [len(df2)],
         "k": [k],
+        "mem_used_indexation_MB": [mem_used_create_index],
+        "avg_mem_used_search_MB": [avg_mem_used_search],
     }
     results_df = pd.DataFrame(results_data)
 
@@ -341,7 +389,6 @@ def merge_knn_nmslib(k, df1, df2, suffixes) -> DataFrame:
     - Faz merge fuzzy df1 x df2
     - Salva tempos em resultados.csv com metodo = "nmslib_hnsw"
     """
-    import nmslib
 
     # ================================
     #     CARREGAR EMBEDDINGS
@@ -358,6 +405,9 @@ def merge_knn_nmslib(k, df1, df2, suffixes) -> DataFrame:
     # ================================
     start_index_time = time.time()
 
+    process = psutil.Process(os.getpid())
+    mem_before = process.memory_info().rss / (1024 ** 2)  # MB
+    
     index = nmslib.init(
         space="cosinesimil",
         method="hnsw"
@@ -371,6 +421,10 @@ def merge_knn_nmslib(k, df1, df2, suffixes) -> DataFrame:
         },
         print_progress=False,
     )
+    
+    mem_after = process.memory_info().rss / (1024 ** 2)  # MB
+    mem_used_create_index = mem_after - mem_before
+    print(f"Memória utilizada na indexação (NMSLIB): {mem_used_create_index:.2f} MB")
 
     index_time = time.time() - start_index_time
     print(f"Tempo de criação do índice (NMSLIB HNSW): {index_time:.4f} segundos")
@@ -384,15 +438,21 @@ def merge_knn_nmslib(k, df1, df2, suffixes) -> DataFrame:
     soma_tempo_busca = 0.0
     neighbors = None
     distances = None
+    soma_qtde_mem = 0.0
 
     for i in range(num_execucoes):
         start_search_time = time.time()
+        mem_before = process.memory_info().rss / (1024 ** 2)  # MB
         res = index.knnQueryBatch(embeddings2, k=k)  # queries = df1
+        mem_after = process.memory_info().rss / (1024 ** 2)  # MB
+        mem_used_search = mem_after - mem_before
+        soma_qtde_mem += mem_used_search
         search_time = time.time() - start_search_time
         soma_tempo_busca += search_time
         neighbors, distances = zip(*res)
 
     avg_search_time = soma_tempo_busca / num_execucoes
+    avg_mem_used_search = soma_qtde_mem / num_execucoes
     print(f"Tempo médio de busca (NMSLIB HNSW) em {num_execucoes} execuções: {avg_search_time:.4f} segundos")
 
     I = np.vstack(neighbors)       # indices em df2
@@ -439,6 +499,8 @@ def merge_knn_nmslib(k, df1, df2, suffixes) -> DataFrame:
         "num_rows_df1": [len(df1)],
         "num_rows_df2": [len(df2)],
         "k": [k],
+        "mem_used_indexation_MB": [mem_used_create_index],
+        "avg_mem_used_search_MB": [avg_mem_used_search],
     }
     results_df = pd.DataFrame(results_data)
 

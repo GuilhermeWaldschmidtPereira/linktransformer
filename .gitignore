@@ -29,3 +29,11 @@ wiki_aliases_copy/**
 **archive_to_remove**
 venv/
 .venv_scann/
+.venv_plot_results/
+.venv*/
+venv*/
+env/
+.env/
+ENV/
+env.bak/
+venv.bak/
