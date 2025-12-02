@@ -40,7 +40,7 @@ def plot_results(results_df, output_path):
 
     # Gráfico de Uso de Memória
     plt.figure(figsize=(10, 6))
-    ax = sns.barplot(x="metodo", y="avg_mem_used_search_MB", data=results_df[["metodo", "avg_mem_used_search_MB"]].drop_duplicates())
+    ax = sns.barplot(x="metodo", y="avg_mem_used_search_MBs", data=results_df[["metodo", "avg_mem_used_search_MBs"]].drop_duplicates())
     for container in ax.containers:
         ax.bar_label(container, fmt='%.2f')
     plt.title("Uso de Memória por Método")

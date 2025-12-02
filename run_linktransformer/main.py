@@ -1,72 +1,183 @@
+#!/usr/bin/env python3
 import os
 import sys
-import pandas as pd
+import time
+from typing import Union, List, Optional
 
-# ======================================================
-# 1) Colocar o src/ do repositório no sys.path
-#    (para importar diretamente o código do GitHub)
-# ======================================================
-THIS_DIR = os.path.dirname(__file__)
+import numpy as np
+import pandas as pd
+from pandas import DataFrame
+
+
+# ==========================================
+# 1) Tornar o src/ importável como pacote
+# ==========================================
+THIS_DIR = os.path.dirname(__file__)           # pasta deste script (ex.: run_linktransformer)
 REPO_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
 SRC_DIR = os.path.join(REPO_ROOT, "src")
 
 if SRC_DIR not in sys.path:
-    sys.path.append(SRC_DIR)
+    sys.path.insert(0, SRC_DIR)
 
-# Agora podemos importar direto do arquivo infer.py
-from linktransformer.infer import merge_knn, merge_knn2
-import argparse
-
+# Agora podemos importar do pacote linktransformer
+from linktransformer.utils import (
+    serialize_columns,
+    infer_embeddings,
+    load_model,
+)
+from linktransformer.infer_scann import merge_knn_scann
 
 def main():
     # ==========================================
     # 2) Ler os CSV de endereços
     # ==========================================
     data_dir = os.path.join(THIS_DIR, "../data")
-    base_path = os.path.join(data_dir, "base.csv")
-    query_path = os.path.join(data_dir, "query.csv")
+    base_path = os.path.join(data_dir, "enderecos_10000.csv")
+    query_path = os.path.join(data_dir, "enderecos_100_ruido.csv")
 
     if not os.path.exists(base_path):
         raise FileNotFoundError(f"Não encontrei {base_path}")
     if not os.path.exists(query_path):
         raise FileNotFoundError(f"Não encontrei {query_path}")
 
+    # Verificar se os arquivos de embeddings já existem
+    embeddings_query_path = os.path.join(data_dir, "embeddings_query.npy")
+    embeddings_base_path = os.path.join(data_dir, "embeddings_base.npy")
+
     df_base = pd.read_csv(base_path)
     df_query = pd.read_csv(query_path)
 
-    print("\nBase (endereços corretos):")
-    print(df_base.head())
-    print("\nQuery (endereços com erros):")
-    print(df_query.head())
+    # -------------------------
+    # Configurações
+    # -------------------------
+    on: Optional[Union[str, List[str]]] = None
+    left_on: Optional[Union[str, List[str]]] = None
+    right_on: Optional[Union[str, List[str]]] = None
+    model: Union[str, object] = "sentence-transformers/all-MiniLM-L6-v2"
+    suffixes = ("_x", "_y")
+    batch_size = 128
+    openai_key: Optional[str] = None  # se for usar OpenAI, coloque aqui
 
-    # ==========================================
-    # 3) Chamar merge_knn diretamente
-    #    (sem usar 'import linktransformer as lt')
-    # ==========================================
-    # ATENÇÃO: assinatura do merge_knn em infer.py (versão atual upstream)
-    # merge_knn(df1, df2, merge_type='1:1', on=None, model='all-MiniLM-L6-v2',
-    #           left_on=None, right_on=None, k=1, suffixes=('_x', '_y'),
-    #           use_gpu=False, batch_size=128, openai_key=None,
-    #           drop_sim_threshold=None)
-    #
-    # Aqui vou deixar merge_type no default ('1:1') e só setar o essencial.
-    merged = merge_knn(
-        df1=df_base,
-        df2=df_query,
-        on=None,
-        model="sentence-transformers/all-MiniLM-L6-v2",
-        k=1,
-        # você pode ajustar batch_size se quiser
-        batch_size=64,
-    )
+    # -------------------------
+    # 3) Escolher colunas de junção
+    # -------------------------
+    if on is None:
+        on = list(set(df_base.columns).intersection(set(df_query.columns)))
+        print(f"Colunas em comum detectadas para matching: {on}")
 
-    print("\nResultado do merge_knn (endereços):")
-    # As colunas exatas podem variar dependendo da versão; ajuste se precisar
-    cols_to_show = [c for c in merged.columns if any(
-        x in c for x in ["id", "name", "score"]
-    )]
-    print(merged[cols_to_show].head(15))
+    if left_on is None:
+        left_on = on
+    if right_on is None:
+        right_on = on
 
+    # não usamos mais "on" diretamente
+    on = None
+
+    df1 = df_base.copy()
+    df2 = df_query.copy()
+
+    # garantir que não existe id_lt
+    if "id_lt" in df1.columns:
+        raise ValueError("Column id_lt already exists in df_base, renomeie antes de continuar")
+    if "id_lt" in df2.columns:
+        raise ValueError("Column id_lt already exists in df_query, renomeie antes de continuar")
+
+    df1.loc[:, "id_lt"] = np.arange(len(df1))
+    df2.loc[:, "id_lt"] = np.arange(len(df2))
+    if not (os.path.exists(embeddings_query_path) and os.path.exists(embeddings_base_path)):
+        print(f"Embeddings não encontrados. Serão gerados novamente.")
+
+        # -------------------------
+        # 4) Serializar colunas (usa utils do linktransformer)
+        # -------------------------
+        if isinstance(right_on, list):
+            strings_right = serialize_columns(df2, right_on, model=model)
+        else:
+            # caso simples: uma única coluna em cada lado
+            strings_right = df2[right_on].tolist()
+
+        if isinstance(left_on, list):
+            strings_left = serialize_columns(df1, left_on, model=model)
+        else:
+            strings_left = df1[left_on].tolist()
+
+        # -------------------------
+        # 5) Carregar modelo e inferir embeddings
+        # -------------------------
+        if isinstance(model, str):
+            if openai_key is None:
+                print(f"Carregando modelo {model} via linktransformer.load_model...")
+                model = load_model(model)
+
+        print("Inferindo embeddings para df_query (df1)...")
+        embeddings1 = infer_embeddings(
+            strings_left,
+            model,
+            batch_size=batch_size,
+            openai_key=openai_key,
+            return_numpy=True,
+        )
+
+        print("Inferindo embeddings para df_base (df2)...")
+        embeddings2 = infer_embeddings(
+            strings_right,
+            model,
+            batch_size=batch_size,
+            openai_key=openai_key,
+            return_numpy=True,
+        )
+
+        # Garantir shape 2D
+        if embeddings1.ndim == 1:
+            embeddings1 = np.expand_dims(embeddings1, axis=0)
+        if embeddings2.ndim == 1:
+            embeddings2 = np.expand_dims(embeddings2, axis=0)
+
+        # Normaliza embeddings -> cosine / dot_product-friendly
+        embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
+        embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
+
+        print(f"embeddings1 shape: {embeddings1.shape}")
+        print(f"embeddings2 shape: {embeddings2.shape}")
+
+        # ----------------------------------------
+        # 6) (Opcional) salvar embeddings em .npy
+        #    para outros scripts (FAISS, SVS, HNSW, ScaNN, etc.)
+        # ----------------------------------------
+        emb_dir = os.path.join(THIS_DIR, "embeddings")
+        os.makedirs(emb_dir, exist_ok=True)
+
+        np.save(os.path.join(f"{data_dir}/embeddings_query.npy"), embeddings1.astype(np.float32))
+        np.save(os.path.join(f"{data_dir}/embeddings_base.npy"), embeddings2.astype(np.float32))
+
+        print(f"Embeddings salvos em: {emb_dir}")
+        
+    else:
+        df_base = pd.read_csv(base_path)
+        df_query = pd.read_csv(query_path)
+
+        if left_on is None:
+            left_on = on
+        if right_on is None:
+            right_on = on
+
+        # não usamos mais "on" diretamente
+        on = None
+
+        df1 = df_base.copy()
+        df2 = df_query.copy()
+
+        # garantir que não existe id_lt
+        if "id_lt" in df1.columns:
+            raise ValueError("Column id_lt already exists in df_base, renomeie antes de continuar")
+        if "id_lt" in df2.columns:
+            raise ValueError("Column id_lt already exists in df_query, renomeie antes de continuar")
+
+        df1.loc[:, "id_lt"] = np.arange(len(df1))
+        df2.loc[:, "id_lt"] = np.arange(len(df2))
+
+    merge_knn_scann(1, df1, df2, suffixes)
+    
 
 if __name__ == "__main__":
     main()
