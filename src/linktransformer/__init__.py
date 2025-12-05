@@ -3,7 +3,7 @@
 __version__ = "0.1.17"
 __MODEL_HUB_ORGANIZATION__ = 'sentence-transformers' #For compatibility with sentence-transformers
 from .data import DATA_DIR_PATH
-from .infer_scann import *
+#from .infer_scann import *
 from .preprocess import *
 from .train_model import *
 from .modified_sbert import *
