@@ -1,0 +1,60 @@
+id,nome,sobrenome,data_nascimento,cidade,telefone,temp_id,id_lt
+0,Ana,Silva,1990-05-14,Salvador,71988887777,0,0
+1,Lucas,Santos,1988-02-20,Feira de Santana,75999112233,1,1
+4,Fernanda,Costa,1992-09-10,Ilhéus,73991234567,4,4
+5,Bruno,Rocha,1991-03-28,Itabuna,73988776655,5,5
+6,Paula,Martins,1996-12-01,Salvador,71999119933,6,6
+8,Camila,Lima,1993-01-22,Camaçari,71991239876,8,8
+9,Juliana,Barbosa,1994-10-09,Lauro de Freitas,71999881122,9,9
+15,Brno,Rocha,1991-03-28,Itabuna,7398877665  <-- duplicata id 5,15,15
+16,Paolla,Martns,1996-12-01,Salvdor,7199911993 <-- duplicata id 6,16,16
+17,Diogo,Pereiraa,1989-04-16,Feira Santana,7599988776 <-- duplicata id 7,17,17
+21,Carla,Moreira,1997-08-12,Ilhéus,73999882211,21,21
+22,João,Andrade,1986-03-03,Itabuna,73991115544,22,22
+23,Mateus,Carvalho,1990-10-21,Salvador,71990002233,23,23
+24,Patrícia,Gomes,1994-02-15,Camaçari,71990007755,24,24
+25,Tatiane,Reis,1993-06-16,Vitória da Conquista,77992223344,25,25
+26,Leandro,Pinto,1991-11-30,Itabuna,73999886655,26,26
+27,Renata,Moura,1992-04-04,Ilhéus,73998771234,27,27
+28,André,Souza,1985-09-08,Salvador,71992224455,28,28
+29,Daniel,Freitas,1989-12-17,Camaçari,71993335566,29,29
+31,Crla,Moreeira,1997-08-12,Ilheús,7399988221   <-- duplicata id 21,31,31
+32,Jão,Andrad,1986-03-03,Itbuna,7399111554   <-- duplicata id 22,32,32
+34,Patricia,Gomes,1994-02-15,Camacri,7199000775  <-- duplicata id 24,34,34
+35,Tatiana,Res,1993-06-16,Vitoria da Conqusta,7799222334 <-- duplicata id 25,35,35
+41,Rodrigo,Lopes,1992-07-18,Ilhéus,73991228766,41,41
+44,Sílvia,Barros,1995-12-30,Feira de Santana,75991234455,44,44
+45,Thiago,Brito,1991-04-25,Salvador,71995554433,45,45
+48,Érica,Assis,1992-09-15,Salvador,71993334455,48,48
+49,Aline,Ferreira,1994-06-09,Itabuna,73990009988,49,49
+50,Fabina,Pirres,1990-03-14,Salvdor,7199877345 <-- duplicata id 40,50,50
+51,Rodrgo,Lpess,1992-07-18,Ilhes,7399122876 <-- duplicata id 41,51,51
+53,Marceo,Feraz,1988-01-11,Vitoria Conquista,7799233455 <-- duplicata id 43,53,53
+56,Elane,Catro,1986-05-19,Camacari,7199888771 <-- duplicata id 46,56,56
+57,Carolin,Mattos,1993-07-12,Lauro Freita,7199000123 <-- duplicata id 47,57,57
+62,Eduardo,Teles,1988-03-19,Feira de Santana,75992223455,62,62
+63,Mônica,Ramalho,1993-12-04,Vitória da Conquista,77993332211,63,63
+64,Priscila,Moreira,1990-08-22,Ilhéus,73991112233,64,64
+65,Leonardo,Assunção,1994-07-15,Salvador,71997776655,65,65
+66,José,Nascimentoo,1983-09-07,Slvadr,7199000114 <-- duplicata id 60,66,66
+71,Leonrdo,Asunçao,1994-07-15,Slvador,7199777665 <-- duplicata id 65,71,71
+72,Sérgio,Fontes,1989-02-14,Feira de Santana,75991234588,72,72
+73,Hugo,Cardim,1987-11-30,Vitória da Conquista,77995554422,73,73
+74,Rita,Monteiro,1992-10-17,Ilhéus,73993335511,74,74
+75,Larissa,Alves,1996-03-08,Camaçari,71990007733,75,75
+76,Bruna,Medeiros,1994-12-12,Itabuna,73998881133,76,76
+78,Hgo,Cardin,1987-11-30,Vioria Conquista,7799555442 <-- duplicata id 73,78,78
+79,Ria,Monteir,1992-10-17,Ilheús,7399333551 <-- duplicata id 74,79,79
+82,Caio,Guedes,1990-10-10,Salvador,71995553322,82,82
+83,Vanessa,Ribeiro,1992-09-18,Feira de Santana,75990004422,83,83
+84,Murilo,Porto,1991-02-23,Itabuna,73995556633,84,84
+85,Yasmin,Araújo,1993-05-28,Lauro de Freitas,71990001177,85,85
+87,Vanesa,Ribero,1992-09-18,Feira Santana,7599000442 <-- duplicata id 83,87,87
+90,Luis,Queiroz,1987-04-14,Camaçari,71995557799,90,90
+91,Helena,Brito,1995-11-11,Itabuna,73991113344,91,91
+92,Marcela,Gonçalves,1992-07-19,Salvador,71998886644,92,92
+94,Lus,Queroz,1987-04-14,Camacri,7199555779 <-- duplicata id 90,94,94
+95,Helna,Britoo,1995-11-11,Itabua,7399111334 <-- duplicata id 91,95,95
+96,Marcela,Goncalves,1992-07-19,Slvador,7199888664 <-- duplicata id 92,96,96
+97,Tiago,Nevees,1990-01-20,Feira Santana,7599000115 <-- duplicata id 93,97,97
+98,Otávio,Silveira,1989-06-14,Salvador,71997778899,98,98

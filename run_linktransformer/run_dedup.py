@@ -26,7 +26,7 @@ from linktransformer.utils import (
     load_model,
 )
 
-from linktransformer.infer import dedup_rows
+from linktransformer.infer_main import dedup_rows
 
 def main():
     # ==========================================
@@ -55,8 +55,7 @@ def main():
     )
 
     print("\nDataFrame após deduplicação:")
-    print(deduped.head())
-    print(len(deduped))
+    deduped.to_csv("deduplicated_output.csv", index=False)
 
 if __name__ == "__main__":
     main()

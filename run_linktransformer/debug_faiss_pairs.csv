@@ -1,0 +1,156 @@
+id_l,nome_l,sobrenome_l,data_nascimento_l,cidade_l,telefone_l,temp_id_l,id_lt_l,id_r,nome_r,sobrenome_r,data_nascimento_r,cidade_r,telefone_r,temp_id_r,id_lt_r,score
+0,Ana,Silva,1990-05-14,Salvador,71988887777,0,0,0,Ana,Silva,1990-05-14,Salvador,71988887777,0,0,0.9999999
+0,Ana,Silva,1990-05-14,Salvador,71988887777,0,0,10,Ana,Silvaa,1990-05-14,Salvadr,7198888777     <-- duplicata com ruído da id 0,10,10,0.95764315
+1,Lucas,Santos,1988-02-20,Feira de Santana,75999112233,1,1,1,Lucas,Santos,1988-02-20,Feira de Santana,75999112233,1,1,1.0
+2,Mariana,Oliveira,1995-11-02,Vitória da Conquista,77988334455,2,2,2,Mariana,Oliveira,1995-11-02,Vitória da Conquista,77988334455,2,2,1.0
+3,Rafael,Almeida,1987-07-18,Salvador,71987654321,3,3,3,Rafael,Almeida,1987-07-18,Salvador,71987654321,3,3,1.0
+3,Rafael,Almeida,1987-07-18,Salvador,71987654321,3,3,7,Diego,Pereira,1989-04-16,Feira de Santana,75999887766,7,7,0.7658322
+3,Rafael,Almeida,1987-07-18,Salvador,71987654321,3,3,13,Rafaell,Almeda,1987-07-18,Salvador,71987654312  <-- duplicata id 3,13,13,0.7037357
+4,Fernanda,Costa,1992-09-10,Ilhéus,73991234567,4,4,4,Fernanda,Costa,1992-09-10,Ilhéus,73991234567,4,4,1.0
+4,Fernanda,Costa,1992-09-10,Ilhéus,73991234567,4,4,14,Fernan,Costa,1992-09-10,Ilhéus,7399123456  <-- duplicata id 4,14,14,0.905161
+5,Bruno,Rocha,1991-03-28,Itabuna,73988776655,5,5,5,Bruno,Rocha,1991-03-28,Itabuna,73988776655,5,5,0.9999999
+6,Paula,Martins,1996-12-01,Salvador,71999119933,6,6,6,Paula,Martins,1996-12-01,Salvador,71999119933,6,6,1.0
+7,Diego,Pereira,1989-04-16,Feira de Santana,75999887766,7,7,7,Diego,Pereira,1989-04-16,Feira de Santana,75999887766,7,7,1.0
+7,Diego,Pereira,1989-04-16,Feira de Santana,75999887766,7,7,3,Rafael,Almeida,1987-07-18,Salvador,71987654321,3,3,0.7658322
+8,Camila,Lima,1993-01-22,Camaçari,71991239876,8,8,8,Camila,Lima,1993-01-22,Camaçari,71991239876,8,8,1.0
+9,Juliana,Barbosa,1994-10-09,Lauro de Freitas,71999881122,9,9,9,Juliana,Barbosa,1994-10-09,Lauro de Freitas,71999881122,9,9,1.0
+10,Ana,Silvaa,1990-05-14,Salvadr,7198888777     <-- duplicata com ruído da id 0,10,10,10,Ana,Silvaa,1990-05-14,Salvadr,7198888777     <-- duplicata com ruído da id 0,10,10,1.0
+10,Ana,Silvaa,1990-05-14,Salvadr,7198888777     <-- duplicata com ruído da id 0,10,10,0,Ana,Silva,1990-05-14,Salvador,71988887777,0,0,0.95764315
+11,Lucaz,Santos,1988-02-20,Feira de Santna,7599911223  <-- duplicata id 1,11,11,11,Lucaz,Santos,1988-02-20,Feira de Santna,7599911223  <-- duplicata id 1,11,11,1.0
+11,Lucaz,Santos,1988-02-20,Feira de Santna,7599911223  <-- duplicata id 1,11,11,90,Luis,Queiroz,1987-04-14,Camaçari,71995557799,90,90,0.7085891
+12,Marina,Oliveeira,1995-11-02,Vitoria da Conqta,7798833445 <-- duplicata id 2,12,12,12,Marina,Oliveeira,1995-11-02,Vitoria da Conqta,7798833445 <-- duplicata id 2,12,12,0.9999999
+12,Marina,Oliveeira,1995-11-02,Vitoria da Conqta,7798833445 <-- duplicata id 2,12,12,52,Sandraa,Texeira,1994-09-21,Itabua,7399882334 <-- duplicata id 42,52,52,0.7683562
+12,Marina,Oliveeira,1995-11-02,Vitoria da Conqta,7798833445 <-- duplicata id 2,12,12,42,Sandra,Teixeira,1994-09-21,Itabuna,73998823344,42,42,0.73668265
+13,Rafaell,Almeda,1987-07-18,Salvador,71987654312  <-- duplicata id 3,13,13,13,Rafaell,Almeda,1987-07-18,Salvador,71987654312  <-- duplicata id 3,13,13,0.9999999
+13,Rafaell,Almeda,1987-07-18,Salvador,71987654312  <-- duplicata id 3,13,13,3,Rafael,Almeida,1987-07-18,Salvador,71987654321,3,3,0.7037357
+14,Fernan,Costa,1992-09-10,Ilhéus,7399123456  <-- duplicata id 4,14,14,14,Fernan,Costa,1992-09-10,Ilhéus,7399123456  <-- duplicata id 4,14,14,1.0
+14,Fernan,Costa,1992-09-10,Ilhéus,7399123456  <-- duplicata id 4,14,14,4,Fernanda,Costa,1992-09-10,Ilhéus,73991234567,4,4,0.905161
+15,Brno,Rocha,1991-03-28,Itabuna,7398877665  <-- duplicata id 5,15,15,15,Brno,Rocha,1991-03-28,Itabuna,7398877665  <-- duplicata id 5,15,15,0.9999995
+16,Paolla,Martns,1996-12-01,Salvdor,7199911993 <-- duplicata id 6,16,16,16,Paolla,Martns,1996-12-01,Salvdor,7199911993 <-- duplicata id 6,16,16,1.0
+17,Diogo,Pereiraa,1989-04-16,Feira Santana,7599988776 <-- duplicata id 7,17,17,17,Diogo,Pereiraa,1989-04-16,Feira Santana,7599988776 <-- duplicata id 7,17,17,0.99999994
+18,Camla,Lma,1993-01-22,Camacari,7199123987 <-- duplicata id 8,18,18,18,Camla,Lma,1993-01-22,Camacari,7199123987 <-- duplicata id 8,18,18,1.0
+19,Julina,Babosa,1994-10-09,Lauro Freitas,7199988112 <-- duplicata id 9,19,19,19,Julina,Babosa,1994-10-09,Lauro Freitas,7199988112 <-- duplicata id 9,19,19,0.9999998
+20,Roberto,Cardoso,1982-05-05,Salvador,71990001122,20,20,20,Roberto,Cardoso,1982-05-05,Salvador,71990001122,20,20,0.9999999
+21,Carla,Moreira,1997-08-12,Ilhéus,73999882211,21,21,21,Carla,Moreira,1997-08-12,Ilhéus,73999882211,21,21,0.9999999
+22,João,Andrade,1986-03-03,Itabuna,73991115544,22,22,22,João,Andrade,1986-03-03,Itabuna,73991115544,22,22,0.99999976
+23,Mateus,Carvalho,1990-10-21,Salvador,71990002233,23,23,23,Mateus,Carvalho,1990-10-21,Salvador,71990002233,23,23,0.9999998
+23,Mateus,Carvalho,1990-10-21,Salvador,71990002233,23,23,33,Matheus,Carvalho,1990-10-21,Salvadr,7199000223  <-- duplicata id 23,33,33,0.7232208
+24,Patrícia,Gomes,1994-02-15,Camaçari,71990007755,24,24,34,Patricia,Gomes,1994-02-15,Camacri,7199000775  <-- duplicata id 24,34,34,1.0
+24,Patrícia,Gomes,1994-02-15,Camaçari,71990007755,24,24,24,Patrícia,Gomes,1994-02-15,Camaçari,71990007755,24,24,1.0
+25,Tatiane,Reis,1993-06-16,Vitória da Conquista,77992223344,25,25,25,Tatiane,Reis,1993-06-16,Vitória da Conquista,77992223344,25,25,1.0
+26,Leandro,Pinto,1991-11-30,Itabuna,73999886655,26,26,26,Leandro,Pinto,1991-11-30,Itabuna,73999886655,26,26,0.99999976
+26,Leandro,Pinto,1991-11-30,Itabuna,73999886655,26,26,36,Leandro,Pintto,1991-11-30,Itabna,7399988665 <-- duplicata id 26,36,36,0.7584996
+27,Renata,Moura,1992-04-04,Ilhéus,73998771234,27,27,27,Renata,Moura,1992-04-04,Ilhéus,73998771234,27,27,1.0
+28,André,Souza,1985-09-08,Salvador,71992224455,28,28,28,André,Souza,1985-09-08,Salvador,71992224455,28,28,0.99999994
+29,Daniel,Freitas,1989-12-17,Camaçari,71993335566,29,29,29,Daniel,Freitas,1989-12-17,Camaçari,71993335566,29,29,0.9999995
+30,Robero,Cardso,1982-05-05,Salvdor,7199000112   <-- duplicata id 20,30,30,30,Robero,Cardso,1982-05-05,Salvdor,7199000112   <-- duplicata id 20,30,30,1.0
+31,Crla,Moreeira,1997-08-12,Ilheús,7399988221   <-- duplicata id 21,31,31,31,Crla,Moreeira,1997-08-12,Ilheús,7399988221   <-- duplicata id 21,31,31,1.0
+32,Jão,Andrad,1986-03-03,Itbuna,7399111554   <-- duplicata id 22,32,32,32,Jão,Andrad,1986-03-03,Itbuna,7399111554   <-- duplicata id 22,32,32,1.0
+33,Matheus,Carvalho,1990-10-21,Salvadr,7199000223  <-- duplicata id 23,33,33,33,Matheus,Carvalho,1990-10-21,Salvadr,7199000223  <-- duplicata id 23,33,33,0.9999995
+33,Matheus,Carvalho,1990-10-21,Salvadr,7199000223  <-- duplicata id 23,33,33,23,Mateus,Carvalho,1990-10-21,Salvador,71990002233,23,23,0.7232208
+34,Patricia,Gomes,1994-02-15,Camacri,7199000775  <-- duplicata id 24,34,34,34,Patricia,Gomes,1994-02-15,Camacri,7199000775  <-- duplicata id 24,34,34,1.0
+34,Patricia,Gomes,1994-02-15,Camacri,7199000775  <-- duplicata id 24,34,34,24,Patrícia,Gomes,1994-02-15,Camaçari,71990007755,24,24,1.0
+35,Tatiana,Res,1993-06-16,Vitoria da Conqusta,7799222334 <-- duplicata id 25,35,35,35,Tatiana,Res,1993-06-16,Vitoria da Conqusta,7799222334 <-- duplicata id 25,35,35,1.0
+36,Leandro,Pintto,1991-11-30,Itabna,7399988665 <-- duplicata id 26,36,36,36,Leandro,Pintto,1991-11-30,Itabna,7399988665 <-- duplicata id 26,36,36,0.9999999
+36,Leandro,Pintto,1991-11-30,Itabna,7399988665 <-- duplicata id 26,36,36,26,Leandro,Pinto,1991-11-30,Itabuna,73999886655,26,26,0.7584996
+37,Renta,Moura,1992-04-04,Ilheús,7399877123 <-- duplicata id 27,37,37,37,Renta,Moura,1992-04-04,Ilheús,7399877123 <-- duplicata id 27,37,37,1.0
+38,Andre,Souzza,1985-09-08,Salvadr,7199222445 <-- duplicata id 28,38,38,38,Andre,Souzza,1985-09-08,Salvadr,7199222445 <-- duplicata id 28,38,38,1.0
+39,Danilo,Freitts,1989-12-17,Camacari,7199333556 <-- duplicata id 29,39,39,39,Danilo,Freitts,1989-12-17,Camacari,7199333556 <-- duplicata id 29,39,39,1.0
+40,Fabiana,Pires,1990-03-14,Salvador,71998773455,40,40,40,Fabiana,Pires,1990-03-14,Salvador,71998773455,40,40,1.0
+41,Rodrigo,Lopes,1992-07-18,Ilhéus,73991228766,41,41,41,Rodrigo,Lopes,1992-07-18,Ilhéus,73991228766,41,41,1.0
+42,Sandra,Teixeira,1994-09-21,Itabuna,73998823344,42,42,42,Sandra,Teixeira,1994-09-21,Itabuna,73998823344,42,42,1.0
+42,Sandra,Teixeira,1994-09-21,Itabuna,73998823344,42,42,52,Sandraa,Texeira,1994-09-21,Itabua,7399882334 <-- duplicata id 42,52,52,0.8668057
+42,Sandra,Teixeira,1994-09-21,Itabuna,73998823344,42,42,12,Marina,Oliveeira,1995-11-02,Vitoria da Conqta,7798833445 <-- duplicata id 2,12,12,0.73668265
+43,Marcelo,Ferraz,1988-01-11,Vitória da Conquista,77992334556,43,43,43,Marcelo,Ferraz,1988-01-11,Vitória da Conquista,77992334556,43,43,0.9999996
+44,Sílvia,Barros,1995-12-30,Feira de Santana,75991234455,44,44,44,Sílvia,Barros,1995-12-30,Feira de Santana,75991234455,44,44,0.9999998
+44,Sílvia,Barros,1995-12-30,Feira de Santana,75991234455,44,44,54,Silvia,Baroos,1995-12-30,Feira Santana,7599123445 <-- duplicata id 44,54,54,0.79602945
+45,Thiago,Brito,1991-04-25,Salvador,71995554433,45,45,45,Thiago,Brito,1991-04-25,Salvador,71995554433,45,45,0.9999999
+45,Thiago,Brito,1991-04-25,Salvador,71995554433,45,45,55,Tiago,Britto,1991-04-25,Salavdor,7199555443 <-- duplicata id 45,55,55,0.7102283
+45,Thiago,Brito,1991-04-25,Salvador,71995554433,45,45,93,Thiago,Neves,1990-01-20,Feira de Santana,75990001155,93,93,0.70446545
+46,Elaine,Castro,1986-05-19,Camaçari,71998887711,46,46,46,Elaine,Castro,1986-05-19,Camaçari,71998887711,46,46,1.0
+47,Caroline,Matos,1993-07-12,Lauro de Freitas,71990001234,47,47,47,Caroline,Matos,1993-07-12,Lauro de Freitas,71990001234,47,47,0.9999998
+48,Érica,Assis,1992-09-15,Salvador,71993334455,48,48,48,Érica,Assis,1992-09-15,Salvador,71993334455,48,48,0.9999999
+48,Érica,Assis,1992-09-15,Salvador,71993334455,48,48,58,Erica,Asis,1992-09-15,Slvador,7199333445 <-- duplicata id 48,58,58,0.8410859
+49,Aline,Ferreira,1994-06-09,Itabuna,73990009988,49,49,49,Aline,Ferreira,1994-06-09,Itabuna,73990009988,49,49,1.0
+49,Aline,Ferreira,1994-06-09,Itabuna,73990009988,49,49,59,Aline,Fereira,1994-06-09,Itabua,7399000998 <-- duplicata id 49,59,59,0.7287512
+50,Fabina,Pirres,1990-03-14,Salvdor,7199877345 <-- duplicata id 40,50,50,50,Fabina,Pirres,1990-03-14,Salvdor,7199877345 <-- duplicata id 40,50,50,1.0
+51,Rodrgo,Lpess,1992-07-18,Ilhes,7399122876 <-- duplicata id 41,51,51,51,Rodrgo,Lpess,1992-07-18,Ilhes,7399122876 <-- duplicata id 41,51,51,1.0
+52,Sandraa,Texeira,1994-09-21,Itabua,7399882334 <-- duplicata id 42,52,52,52,Sandraa,Texeira,1994-09-21,Itabua,7399882334 <-- duplicata id 42,52,52,0.99999964
+52,Sandraa,Texeira,1994-09-21,Itabua,7399882334 <-- duplicata id 42,52,52,42,Sandra,Teixeira,1994-09-21,Itabuna,73998823344,42,42,0.8668057
+52,Sandraa,Texeira,1994-09-21,Itabua,7399882334 <-- duplicata id 42,52,52,12,Marina,Oliveeira,1995-11-02,Vitoria da Conqta,7798833445 <-- duplicata id 2,12,12,0.7683562
+53,Marceo,Feraz,1988-01-11,Vitoria Conquista,7799233455 <-- duplicata id 43,53,53,53,Marceo,Feraz,1988-01-11,Vitoria Conquista,7799233455 <-- duplicata id 43,53,53,1.0
+54,Silvia,Baroos,1995-12-30,Feira Santana,7599123445 <-- duplicata id 44,54,54,54,Silvia,Baroos,1995-12-30,Feira Santana,7599123445 <-- duplicata id 44,54,54,0.99999976
+54,Silvia,Baroos,1995-12-30,Feira Santana,7599123445 <-- duplicata id 44,54,54,44,Sílvia,Barros,1995-12-30,Feira de Santana,75991234455,44,44,0.79602945
+55,Tiago,Britto,1991-04-25,Salavdor,7199555443 <-- duplicata id 45,55,55,55,Tiago,Britto,1991-04-25,Salavdor,7199555443 <-- duplicata id 45,55,55,0.9999994
+55,Tiago,Britto,1991-04-25,Salavdor,7199555443 <-- duplicata id 45,55,55,45,Thiago,Brito,1991-04-25,Salvador,71995554433,45,45,0.7102283
+55,Tiago,Britto,1991-04-25,Salavdor,7199555443 <-- duplicata id 45,55,55,97,Tiago,Nevees,1990-01-20,Feira Santana,7599000115 <-- duplicata id 93,97,97,0.70131993
+56,Elane,Catro,1986-05-19,Camacari,7199888771 <-- duplicata id 46,56,56,56,Elane,Catro,1986-05-19,Camacari,7199888771 <-- duplicata id 46,56,56,1.0
+57,Carolin,Mattos,1993-07-12,Lauro Freita,7199000123 <-- duplicata id 47,57,57,57,Carolin,Mattos,1993-07-12,Lauro Freita,7199000123 <-- duplicata id 47,57,57,1.0
+58,Erica,Asis,1992-09-15,Slvador,7199333445 <-- duplicata id 48,58,58,58,Erica,Asis,1992-09-15,Slvador,7199333445 <-- duplicata id 48,58,58,1.0
+58,Erica,Asis,1992-09-15,Slvador,7199333445 <-- duplicata id 48,58,58,48,Érica,Assis,1992-09-15,Salvador,71993334455,48,48,0.8410859
+59,Aline,Fereira,1994-06-09,Itabua,7399000998 <-- duplicata id 49,59,59,59,Aline,Fereira,1994-06-09,Itabua,7399000998 <-- duplicata id 49,59,59,1.0
+59,Aline,Fereira,1994-06-09,Itabua,7399000998 <-- duplicata id 49,59,59,49,Aline,Ferreira,1994-06-09,Itabuna,73990009988,49,49,0.7287512
+60,José,Nascimento,1983-09-07,Salvador,71990001144,60,60,60,José,Nascimento,1983-09-07,Salvador,71990001144,60,60,1.0
+60,José,Nascimento,1983-09-07,Salvador,71990001144,60,60,66,José,Nascimentoo,1983-09-07,Slvadr,7199000114 <-- duplicata id 60,66,66,0.96045077
+61,Cláudia,Farias,1991-01-27,Camaçari,71995556677,61,61,61,Cláudia,Farias,1991-01-27,Camaçari,71995556677,61,61,1.0
+61,Cláudia,Farias,1991-01-27,Camaçari,71995556677,61,61,67,Claudia,Faria,1991-01-27,Camacari,7199555667 <-- duplicata id 61,67,67,0.9704137
+62,Eduardo,Teles,1988-03-19,Feira de Santana,75992223455,62,62,62,Eduardo,Teles,1988-03-19,Feira de Santana,75992223455,62,62,1.0
+63,Mônica,Ramalho,1993-12-04,Vitória da Conquista,77993332211,63,63,63,Mônica,Ramalho,1993-12-04,Vitória da Conquista,77993332211,63,63,1.0
+63,Mônica,Ramalho,1993-12-04,Vitória da Conquista,77993332211,63,63,69,Monica,Ramalo,1993-12-04,Vitoria Conquista,7799333221 <-- duplicata id 63,69,69,0.8955008
+64,Priscila,Moreira,1990-08-22,Ilhéus,73991112233,64,64,64,Priscila,Moreira,1990-08-22,Ilhéus,73991112233,64,64,1.0
+65,Leonardo,Assunção,1994-07-15,Salvador,71997776655,65,65,65,Leonardo,Assunção,1994-07-15,Salvador,71997776655,65,65,1.0
+66,José,Nascimentoo,1983-09-07,Slvadr,7199000114 <-- duplicata id 60,66,66,66,José,Nascimentoo,1983-09-07,Slvadr,7199000114 <-- duplicata id 60,66,66,1.0
+66,José,Nascimentoo,1983-09-07,Slvadr,7199000114 <-- duplicata id 60,66,66,60,José,Nascimento,1983-09-07,Salvador,71990001144,60,60,0.96045077
+67,Claudia,Faria,1991-01-27,Camacari,7199555667 <-- duplicata id 61,67,67,67,Claudia,Faria,1991-01-27,Camacari,7199555667 <-- duplicata id 61,67,67,1.0
+67,Claudia,Faria,1991-01-27,Camacari,7199555667 <-- duplicata id 61,67,67,61,Cláudia,Farias,1991-01-27,Camaçari,71995556677,61,61,0.9704137
+68,Eduarodo,Teles,1988-03-19,Feira Santana,7599222345 <-- duplicata id 62,68,68,68,Eduarodo,Teles,1988-03-19,Feira Santana,7599222345 <-- duplicata id 62,68,68,1.0
+69,Monica,Ramalo,1993-12-04,Vitoria Conquista,7799333221 <-- duplicata id 63,69,69,69,Monica,Ramalo,1993-12-04,Vitoria Conquista,7799333221 <-- duplicata id 63,69,69,1.0
+69,Monica,Ramalo,1993-12-04,Vitoria Conquista,7799333221 <-- duplicata id 63,69,69,63,Mônica,Ramalho,1993-12-04,Vitória da Conquista,77993332211,63,63,0.8955008
+70,Priscilla,Moreeira,1990-08-22,Ilheús,7399111223 <-- duplicata id 64,70,70,70,Priscilla,Moreeira,1990-08-22,Ilheús,7399111223 <-- duplicata id 64,70,70,0.99999976
+70,Priscilla,Moreeira,1990-08-22,Ilheús,7399111223 <-- duplicata id 64,70,70,12,Marina,Oliveeira,1995-11-02,Vitoria da Conqta,7798833445 <-- duplicata id 2,12,12,0.7102957
+71,Leonrdo,Asunçao,1994-07-15,Slvador,7199777665 <-- duplicata id 65,71,71,71,Leonrdo,Asunçao,1994-07-15,Slvador,7199777665 <-- duplicata id 65,71,71,1.0
+72,Sérgio,Fontes,1989-02-14,Feira de Santana,75991234588,72,72,72,Sérgio,Fontes,1989-02-14,Feira de Santana,75991234588,72,72,1.0
+72,Sérgio,Fontes,1989-02-14,Feira de Santana,75991234588,72,72,77,Sergio,Fonttes,1989-02-14,Feira Santana,7599123458 <-- duplicata id 72,77,77,0.93411624
+73,Hugo,Cardim,1987-11-30,Vitória da Conquista,77995554422,73,73,73,Hugo,Cardim,1987-11-30,Vitória da Conquista,77995554422,73,73,1.0
+74,Rita,Monteiro,1992-10-17,Ilhéus,73993335511,74,74,74,Rita,Monteiro,1992-10-17,Ilhéus,73993335511,74,74,0.99999976
+75,Larissa,Alves,1996-03-08,Camaçari,71990007733,75,75,75,Larissa,Alves,1996-03-08,Camaçari,71990007733,75,75,0.99999976
+76,Bruna,Medeiros,1994-12-12,Itabuna,73998881133,76,76,76,Bruna,Medeiros,1994-12-12,Itabuna,73998881133,76,76,0.99999976
+76,Bruna,Medeiros,1994-12-12,Itabuna,73998881133,76,76,81,Brunna,Medeiroos,1994-12-12,Itabna,7399888113 <-- duplicata id 76,81,81,0.8395533
+77,Sergio,Fonttes,1989-02-14,Feira Santana,7599123458 <-- duplicata id 72,77,77,77,Sergio,Fonttes,1989-02-14,Feira Santana,7599123458 <-- duplicata id 72,77,77,1.0
+77,Sergio,Fonttes,1989-02-14,Feira Santana,7599123458 <-- duplicata id 72,77,77,72,Sérgio,Fontes,1989-02-14,Feira de Santana,75991234588,72,72,0.93411624
+78,Hgo,Cardin,1987-11-30,Vioria Conquista,7799555442 <-- duplicata id 73,78,78,78,Hgo,Cardin,1987-11-30,Vioria Conquista,7799555442 <-- duplicata id 73,78,78,0.99999976
+79,Ria,Monteir,1992-10-17,Ilheús,7399333551 <-- duplicata id 74,79,79,79,Ria,Monteir,1992-10-17,Ilheús,7399333551 <-- duplicata id 74,79,79,0.9999999
+80,Larrisa,Alvees,1996-03-08,Camacari,7199000773 <-- duplicata id 75,80,80,80,Larrisa,Alvees,1996-03-08,Camacari,7199000773 <-- duplicata id 75,80,80,0.9999999
+81,Brunna,Medeiroos,1994-12-12,Itabna,7399888113 <-- duplicata id 76,81,81,81,Brunna,Medeiroos,1994-12-12,Itabna,7399888113 <-- duplicata id 76,81,81,1.0
+81,Brunna,Medeiroos,1994-12-12,Itabna,7399888113 <-- duplicata id 76,81,81,76,Bruna,Medeiros,1994-12-12,Itabuna,73998881133,76,76,0.8395533
+82,Caio,Guedes,1990-10-10,Salvador,71995553322,82,82,82,Caio,Guedes,1990-10-10,Salvador,71995553322,82,82,1.0
+82,Caio,Guedes,1990-10-10,Salvador,71995553322,82,82,86,Caio,Guedees,1990-10-10,Salvdor,7199555332 <-- duplicata id 82,86,86,0.85140383
+83,Vanessa,Ribeiro,1992-09-18,Feira de Santana,75990004422,83,83,83,Vanessa,Ribeiro,1992-09-18,Feira de Santana,75990004422,83,83,0.9999999
+84,Murilo,Porto,1991-02-23,Itabuna,73995556633,84,84,84,Murilo,Porto,1991-02-23,Itabuna,73995556633,84,84,0.9999999
+85,Yasmin,Araújo,1993-05-28,Lauro de Freitas,71990001177,85,85,85,Yasmin,Araújo,1993-05-28,Lauro de Freitas,71990001177,85,85,1.0
+85,Yasmin,Araújo,1993-05-28,Lauro de Freitas,71990001177,85,85,89,Ysmin,Arajo,1993-05-28,Laro Freitas,7199000117 <-- duplicata id 85,89,89,0.8634859
+86,Caio,Guedees,1990-10-10,Salvdor,7199555332 <-- duplicata id 82,86,86,86,Caio,Guedees,1990-10-10,Salvdor,7199555332 <-- duplicata id 82,86,86,0.9999998
+86,Caio,Guedees,1990-10-10,Salvdor,7199555332 <-- duplicata id 82,86,86,82,Caio,Guedes,1990-10-10,Salvador,71995553322,82,82,0.85140383
+87,Vanesa,Ribero,1992-09-18,Feira Santana,7599000442 <-- duplicata id 83,87,87,87,Vanesa,Ribero,1992-09-18,Feira Santana,7599000442 <-- duplicata id 83,87,87,0.9999999
+88,Murillo,Portto,1991-02-23,Itbuna,7399555663 <-- duplicata id 84,88,88,88,Murillo,Portto,1991-02-23,Itbuna,7399555663 <-- duplicata id 84,88,88,1.0
+89,Ysmin,Arajo,1993-05-28,Laro Freitas,7199000117 <-- duplicata id 85,89,89,89,Ysmin,Arajo,1993-05-28,Laro Freitas,7199000117 <-- duplicata id 85,89,89,1.0
+89,Ysmin,Arajo,1993-05-28,Laro Freitas,7199000117 <-- duplicata id 85,89,89,85,Yasmin,Araújo,1993-05-28,Lauro de Freitas,71990001177,85,85,0.8634859
+90,Luis,Queiroz,1987-04-14,Camaçari,71995557799,90,90,90,Luis,Queiroz,1987-04-14,Camaçari,71995557799,90,90,0.9999998
+90,Luis,Queiroz,1987-04-14,Camaçari,71995557799,90,90,11,Lucaz,Santos,1988-02-20,Feira de Santna,7599911223  <-- duplicata id 1,11,11,0.7085891
+91,Helena,Brito,1995-11-11,Itabuna,73991113344,91,91,91,Helena,Brito,1995-11-11,Itabuna,73991113344,91,91,0.99999976
+92,Marcela,Gonçalves,1992-07-19,Salvador,71998886644,92,92,92,Marcela,Gonçalves,1992-07-19,Salvador,71998886644,92,92,1.0
+92,Marcela,Gonçalves,1992-07-19,Salvador,71998886644,92,92,96,Marcela,Goncalves,1992-07-19,Slvador,7199888664 <-- duplicata id 92,96,96,1.0
+93,Thiago,Neves,1990-01-20,Feira de Santana,75990001155,93,93,93,Thiago,Neves,1990-01-20,Feira de Santana,75990001155,93,93,1.0
+93,Thiago,Neves,1990-01-20,Feira de Santana,75990001155,93,93,97,Tiago,Nevees,1990-01-20,Feira Santana,7599000115 <-- duplicata id 93,97,97,0.7254021
+93,Thiago,Neves,1990-01-20,Feira de Santana,75990001155,93,93,45,Thiago,Brito,1991-04-25,Salvador,71995554433,45,45,0.70446545
+94,Lus,Queroz,1987-04-14,Camacri,7199555779 <-- duplicata id 90,94,94,94,Lus,Queroz,1987-04-14,Camacri,7199555779 <-- duplicata id 90,94,94,1.0
+95,Helna,Britoo,1995-11-11,Itabua,7399111334 <-- duplicata id 91,95,95,95,Helna,Britoo,1995-11-11,Itabua,7399111334 <-- duplicata id 91,95,95,1.0
+96,Marcela,Goncalves,1992-07-19,Slvador,7199888664 <-- duplicata id 92,96,96,92,Marcela,Gonçalves,1992-07-19,Salvador,71998886644,92,92,1.0
+96,Marcela,Goncalves,1992-07-19,Slvador,7199888664 <-- duplicata id 92,96,96,96,Marcela,Goncalves,1992-07-19,Slvador,7199888664 <-- duplicata id 92,96,96,1.0
+97,Tiago,Nevees,1990-01-20,Feira Santana,7599000115 <-- duplicata id 93,97,97,97,Tiago,Nevees,1990-01-20,Feira Santana,7599000115 <-- duplicata id 93,97,97,0.9999999
+97,Tiago,Nevees,1990-01-20,Feira Santana,7599000115 <-- duplicata id 93,97,97,93,Thiago,Neves,1990-01-20,Feira de Santana,75990001155,93,93,0.7254021
+97,Tiago,Nevees,1990-01-20,Feira Santana,7599000115 <-- duplicata id 93,97,97,55,Tiago,Britto,1991-04-25,Salavdor,7199555443 <-- duplicata id 45,55,55,0.70131993
+98,Otávio,Silveira,1989-06-14,Salvador,71997778899,98,98,98,Otávio,Silveira,1989-06-14,Salvador,71997778899,98,98,0.9999999
+98,Otávio,Silveira,1989-06-14,Salvador,71997778899,98,98,99,Otavio,Silveria,1989-06-14,Slvador,7199777889 <-- duplicata id 98,99,99,0.7573131
+99,Otavio,Silveria,1989-06-14,Slvador,7199777889 <-- duplicata id 98,99,99,99,Otavio,Silveria,1989-06-14,Slvador,7199777889 <-- duplicata id 98,99,99,1.0
+99,Otavio,Silveria,1989-06-14,Slvador,7199777889 <-- duplicata id 98,99,99,98,Otávio,Silveira,1989-06-14,Salvador,71997778899,98,98,0.7573131
