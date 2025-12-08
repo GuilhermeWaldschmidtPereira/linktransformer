@@ -69,7 +69,7 @@ def deduplicate_with_index(
             batch_size=batch_size,
             drop_sim_threshold=threshold
         )
-        
+
         df_pairs.to_csv("debug_faiss_pairs.csv", index=False)  # DEBUG
     
     # 3. Construção do Grafo de Similaridade
