@@ -1,0 +1,16 @@
+version: '3.9'
+
+services:
+  linktransformer:
+    build: .
+    container_name: linktransformer_app
+    working_dir: /usr/src/app
+    # Se quiser ver o código em tempo real, monta o volume:
+    volumes:
+      - .:/usr/src/app
+    # Opcional: sobrescrever o CMD do Dockerfile
+    command: ["python-jl", "run_linktransformer/main2.py"]
+    # Se precisar de variáveis de ambiente pro Julia/Python:
+    # environment:
+    #   - JULIA_NUM_THREADS=4
+    #   - SOME_ENV=foo
