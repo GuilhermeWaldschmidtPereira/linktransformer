@@ -6,14 +6,10 @@ id,nome,sobrenome,data_nascimento,cidade,telefone
 4,Fernanda,Costa,1992-09-10,Ilhéus,73991234567
 5,Bruno,Rocha,1991-03-28,Itabuna,73988776655
 6,Paula,Martins,1996-12-01,Salvador,71999119933
-7,Diego,Pereira,1989-04-16,Feira de Santana,75999887766
 8,Camila,Lima,1993-01-22,Camaçari,71991239876
 9,Juliana,Barbosa,1994-10-09,Lauro de Freitas,71999881122
-10,Ana,Silvaa,1990-05-14,Salvadr,7198888777     <-- duplicata com ruído da id 0
 11,Lucaz,Santos,1988-02-20,Feira de Santna,7599911223  <-- duplicata id 1
 12,Marina,Oliveeira,1995-11-02,Vitoria da Conqta,7798833445 <-- duplicata id 2
-13,Rafaell,Almeda,1987-07-18,Salvador,71987654312  <-- duplicata id 3
-14,Fernan,Costa,1992-09-10,Ilhéus,7399123456  <-- duplicata id 4
 15,Brno,Rocha,1991-03-28,Itabuna,7398877665  <-- duplicata id 5
 16,Paolla,Martns,1996-12-01,Salvdor,7199911993 <-- duplicata id 6
 17,Diogo,Pereiraa,1989-04-16,Feira Santana,7599988776 <-- duplicata id 7
@@ -32,16 +28,12 @@ id,nome,sobrenome,data_nascimento,cidade,telefone
 30,Robero,Cardso,1982-05-05,Salvdor,7199000112   <-- duplicata id 20
 31,Crla,Moreeira,1997-08-12,Ilheús,7399988221   <-- duplicata id 21
 32,Jão,Andrad,1986-03-03,Itbuna,7399111554   <-- duplicata id 22
-33,Matheus,Carvalho,1990-10-21,Salvadr,7199000223  <-- duplicata id 23
-34,Patricia,Gomes,1994-02-15,Camacri,7199000775  <-- duplicata id 24
 35,Tatiana,Res,1993-06-16,Vitoria da Conqusta,7799222334 <-- duplicata id 25
-36,Leandro,Pintto,1991-11-30,Itabna,7399988665 <-- duplicata id 26
 37,Renta,Moura,1992-04-04,Ilheús,7399877123 <-- duplicata id 27
 38,Andre,Souzza,1985-09-08,Salvadr,7199222445 <-- duplicata id 28
 39,Danilo,Freitts,1989-12-17,Camacari,7199333556 <-- duplicata id 29
 40,Fabiana,Pires,1990-03-14,Salvador,71998773455
 41,Rodrigo,Lopes,1992-07-18,Ilhéus,73991228766
-42,Sandra,Teixeira,1994-09-21,Itabuna,73998823344
 43,Marcelo,Ferraz,1988-01-11,Vitória da Conquista,77992334556
 44,Sílvia,Barros,1995-12-30,Feira de Santana,75991234455
 45,Thiago,Brito,1991-04-25,Salvador,71995554433
@@ -51,51 +43,33 @@ id,nome,sobrenome,data_nascimento,cidade,telefone
 49,Aline,Ferreira,1994-06-09,Itabuna,73990009988
 50,Fabina,Pirres,1990-03-14,Salvdor,7199877345 <-- duplicata id 40
 51,Rodrgo,Lpess,1992-07-18,Ilhes,7399122876 <-- duplicata id 41
-52,Sandraa,Texeira,1994-09-21,Itabua,7399882334 <-- duplicata id 42
 53,Marceo,Feraz,1988-01-11,Vitoria Conquista,7799233455 <-- duplicata id 43
-54,Silvia,Baroos,1995-12-30,Feira Santana,7599123445 <-- duplicata id 44
-55,Tiago,Britto,1991-04-25,Salavdor,7199555443 <-- duplicata id 45
 56,Elane,Catro,1986-05-19,Camacari,7199888771 <-- duplicata id 46
 57,Carolin,Mattos,1993-07-12,Lauro Freita,7199000123 <-- duplicata id 47
-58,Erica,Asis,1992-09-15,Slvador,7199333445 <-- duplicata id 48
-59,Aline,Fereira,1994-06-09,Itabua,7399000998 <-- duplicata id 49
 60,José,Nascimento,1983-09-07,Salvador,71990001144
 61,Cláudia,Farias,1991-01-27,Camaçari,71995556677
 62,Eduardo,Teles,1988-03-19,Feira de Santana,75992223455
 63,Mônica,Ramalho,1993-12-04,Vitória da Conquista,77993332211
 64,Priscila,Moreira,1990-08-22,Ilhéus,73991112233
 65,Leonardo,Assunção,1994-07-15,Salvador,71997776655
-66,José,Nascimentoo,1983-09-07,Slvadr,7199000114 <-- duplicata id 60
-67,Claudia,Faria,1991-01-27,Camacari,7199555667 <-- duplicata id 61
 68,Eduarodo,Teles,1988-03-19,Feira Santana,7599222345 <-- duplicata id 62
-69,Monica,Ramalo,1993-12-04,Vitoria Conquista,7799333221 <-- duplicata id 63
-70,Priscilla,Moreeira,1990-08-22,Ilheús,7399111223 <-- duplicata id 64
 71,Leonrdo,Asunçao,1994-07-15,Slvador,7199777665 <-- duplicata id 65
 72,Sérgio,Fontes,1989-02-14,Feira de Santana,75991234588
 73,Hugo,Cardim,1987-11-30,Vitória da Conquista,77995554422
 74,Rita,Monteiro,1992-10-17,Ilhéus,73993335511
 75,Larissa,Alves,1996-03-08,Camaçari,71990007733
 76,Bruna,Medeiros,1994-12-12,Itabuna,73998881133
-77,Sergio,Fonttes,1989-02-14,Feira Santana,7599123458 <-- duplicata id 72
 78,Hgo,Cardin,1987-11-30,Vioria Conquista,7799555442 <-- duplicata id 73
 79,Ria,Monteir,1992-10-17,Ilheús,7399333551 <-- duplicata id 74
 80,Larrisa,Alvees,1996-03-08,Camacari,7199000773 <-- duplicata id 75
-81,Brunna,Medeiroos,1994-12-12,Itabna,7399888113 <-- duplicata id 76
 82,Caio,Guedes,1990-10-10,Salvador,71995553322
 83,Vanessa,Ribeiro,1992-09-18,Feira de Santana,75990004422
 84,Murilo,Porto,1991-02-23,Itabuna,73995556633
 85,Yasmin,Araújo,1993-05-28,Lauro de Freitas,71990001177
-86,Caio,Guedees,1990-10-10,Salvdor,7199555332 <-- duplicata id 82
 87,Vanesa,Ribero,1992-09-18,Feira Santana,7599000442 <-- duplicata id 83
 88,Murillo,Portto,1991-02-23,Itbuna,7399555663 <-- duplicata id 84
-89,Ysmin,Arajo,1993-05-28,Laro Freitas,7199000117 <-- duplicata id 85
-90,Luis,Queiroz,1987-04-14,Camaçari,71995557799
 91,Helena,Brito,1995-11-11,Itabuna,73991113344
 92,Marcela,Gonçalves,1992-07-19,Salvador,71998886644
-93,Thiago,Neves,1990-01-20,Feira de Santana,75990001155
 94,Lus,Queroz,1987-04-14,Camacri,7199555779 <-- duplicata id 90
 95,Helna,Britoo,1995-11-11,Itabua,7399111334 <-- duplicata id 91
-96,Marcela,Goncalves,1992-07-19,Slvador,7199888664 <-- duplicata id 92
-97,Tiago,Nevees,1990-01-20,Feira Santana,7599000115 <-- duplicata id 93
 98,Otávio,Silveira,1989-06-14,Salvador,71997778899
-99,Otavio,Silveria,1989-06-14,Slvador,7199777889 <-- duplicata id 98

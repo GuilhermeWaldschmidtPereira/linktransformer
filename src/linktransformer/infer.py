@@ -649,7 +649,25 @@ def merge_knn(
 
     avg_search_time = soma_tempo_busca / num_execucoes
     print(f"Tempo médio de busca (FAISS) em {num_execucoes} execuções: {avg_search_time:.4f} segundos")
+    
+    ids_to_drop = set()
+    for i,j in zip(I, D):
+        print("Checking indices and scores for duplicates to drop")
+        print(f"Indices: {i}")
+        print(f"Scores: {j}")
+        for idx, score in zip(i,j):
+            if  idx not in ids_to_drop:
+                if idx != i[0] and score >= 0.7:
+                    ids_to_drop.add(idx)
+                    print(f"Index: {idx}, Score: {score}")
+        print("----")
 
+    print(ids_to_drop)
+    exit()
+    df_cleaned = df1.drop(index=ids_to_drop).reset_index(drop=True)
+    
+    df_cleaned.to_csv("df1_cleaned.csv", index=False)
+    
     ## Check nearest neighbor of the first text in df1 as a test
     df1 = df1.reset_index(drop=True)
     df2 = df2.reset_index(drop=True)
@@ -1297,6 +1315,28 @@ def merge_knn_nmslib(
     # Converter distâncias em "score" tipo similaridade (maior = melhor)
     # cosinesimil distance ~ (1 - cos_sim) para vetores unitários
     score_sim = 1.0 - D_dist
+    
+    ids_to_drop = set()
+    count = 0
+    for i,j in zip(I, score_sim):
+        print("Checking indices and scores for duplicates to drop")
+        print(f"Indices: {i}")
+        print(f"Scores: {j}")
+        print("Count: ", count)
+        for idx, score in zip(i,j):
+            if  idx not in ids_to_drop and i[0] not in ids_to_drop:
+                if idx != i[0] and score >= 0.6 and score<1.0:
+                    ids_to_drop.add(idx)
+                    print(f"Index: {idx}, Score: {score}")
+        print("----")
+        count +=1
+
+    print(ids_to_drop)
+    df_cleaned = df1.drop(index=ids_to_drop).reset_index(drop=True)
+    
+    df_cleaned.to_csv("df1_cleaned.csv", index=False)
+    exit()
+
 
     # -------------------------
     # 5) Merge fuzzy com os DataFrames
@@ -1325,6 +1365,9 @@ def merge_knn_nmslib(
         f"LM matched on key columns - left: {left_on}{suffixes[0]}, "
         f"right: {right_on}{suffixes[1]}"
     )
+    
+    print(df_lm_matched)
+    exit()
 
     # -------------------------
     # 6) Salvar tempos em resultados.csv

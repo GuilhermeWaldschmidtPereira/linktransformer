@@ -623,3 +623,110 @@ def merge_knn_scann(k, df1, df2, suffixes) -> DataFrame:
     print(f"Resultados (ScaNN) salvos em {results_file}")
 
     return df_lm_matched
+
+def dedup_rows(
+    df: DataFrame,
+    model: Union[str, LinkTransformer] = "all-MiniLM-L6-v2",
+    on: Union[str, List[str]]=None,
+    cluster_type: str = "SLINK",
+    cluster_params: Dict[str, Any] = {'threshold': 0.5, "min cluster size": 2, "metric": "cosine"},
+    openai_key: str = None
+) -> DataFrame:
+    """
+    Deduplicate a dataframe based on a similarity threshold. This is just clustering and keeping the first row in each cluster.
+    Refer to the docs for the cluster_rows function for more details.
+
+    :param df (DataFrame): Dataframe to deduplicate.
+    :param model (str): Language model to use.
+    :param on (Union[str, List[str]]): Column(s) to deduplicate on.
+    :param cluster_type (str): Clustering method to use. Defaults to "SLINK".
+    :param cluster_params (Dict[str, Any]): Parameters for clustering method. Defaults to {'threshold': 0.5, "min cluster size": 2, "metric": "cosine"}.
+    :param openai_key (str): OpenAI API key
+    :return: DataFrame: The deduplicated dataframe.
+    """
+
+    df = df.copy()
+
+    ##Load model if string
+    if isinstance(model, str):
+        if openai_key is None:
+            model = load_model(model)
+    
+
+    print(f"Deduplicating dataframe with originally {len(df)} rows")
+    ##Drop exact duplicates
+    print("Checking for and dropping exact duplicates")
+    df = df.drop_duplicates(subset=on, keep="first")
+    print(f"Number of rows after dropping exact duplicates: {len(df)}")
+
+    df = cluster_rows(df, model, on, cluster_type, cluster_params, openai_key)
+    df = df.drop_duplicates(subset="cluster", keep="first")
+    df = df.drop(columns=["cluster"])
+    print(f"Number of rows after deduplication: {len(df)}")
+
+    return df
+
+
+def cluster_rows(
+    df: DataFrame,
+    model: Union[str, LinkTransformer] = "all-MiniLM-L6-v2",
+    on: Union[str, List[str]]=None,
+    cluster_type: str = "SLINK",
+    cluster_params: Dict[str, Any] = {'threshold': 0.5, "min cluster size": 2, "metric": "cosine"},
+    openai_key: str = None
+) -> DataFrame:
+    """
+    Deduplicate a dataframe based on a similarity threshold. Various clustering options are supported.
+
+    :param df (DataFrame): Dataframe to deduplicate.
+    :param model (str): Language model to use.
+    :param on (Union[str, List[str]]): Column(s) to cluster on.
+    :param cluster_type (str): Clustering method to use. Defaults to "SLINK".
+    :param cluster_params (Dict[str, Any]): Parameters for clustering method. Defaults to {'threshold': 0.5, "min cluster size": 2, "metric": "cosine"}.
+    :param openai_key (str): OpenAI API key.
+
+    Supported clustering methods and their parameters:
+    
+    - "agglomerative": 
+        - "threshold": 0.5
+        - "clustering linkage": "ward"
+        - "metric": "euclidean"
+
+    - "HDBScan": 
+        - "min cluster size": 5
+        - "min samples": 1
+        - "metric": "cosine"
+
+    - "SLINK": 
+        - "min cluster size": 2
+        - "threshold": 0.1
+        - "metric": "cosine"
+
+    :return: DataFrame: The deduplicated dataframe.
+    """
+
+    df = df.copy()
+
+    ##Load model if string
+    if isinstance(model, str):
+        if openai_key is None:
+            model = load_model(model)
+
+    ## First, get the embeddings
+    ### If len(on)>1, then we need to serialize the columns
+    if isinstance(on, list):
+        strings = serialize_columns(df, on, model=model)
+    else:
+        strings = df[on].tolist()
+    
+    ## Infer embeddings for df
+    embeddings = infer_embeddings(strings, model, batch_size=128, openai_key=openai_key)
+    ## Normalize embedding tensors using numpy
+    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+    ### Now, cluster the embeddings based on similarity threshold
+    labels = cluster(cluster_type, cluster_params, embeddings, corpus_ids=None)
+    ### Now, keep only 1 row per cluster
+    df["cluster"] = labels
+    return df
+
+
