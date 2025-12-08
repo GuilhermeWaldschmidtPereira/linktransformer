@@ -21,10 +21,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 5. Inicializar o PyJulia (gera o python-jl pronto pra uso)
-RUN python -m julia.install
+# RUN python -m julia.install
 
 # 6. Copiar o código
 COPY . .
 
 # 7. Comando padrão: roda o script integrando Python + Julia
-CMD ["python-jl", "run_linktransformer/main2.py"]
+CMD ["python", "run_linktransformer/main_scann.py"]
