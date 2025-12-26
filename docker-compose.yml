@@ -8,10 +8,5 @@ services:
     # Se quiser ver o código em tempo real, monta o volume:
     volumes:
       - .:/usr/src/app
-    # Opcional: sobrescrever o CMD do Dockerfile
+      
     command: ["python", "run_linktransformer/main_scann.py"]
-    # Se precisar de variáveis de ambiente pro Julia/Python:
-    # environment:
-    #   - JULIA_NUM_THREADS=4
-    #   - SOME_ENV=foo
- 
