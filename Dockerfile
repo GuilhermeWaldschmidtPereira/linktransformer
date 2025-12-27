@@ -22,10 +22,6 @@ WORKDIR /usr/src/app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 4) Inicializar PyJulia (se você usa o pacote `julia`)
-# Se não usa PyJulia, pode remover essa linha.
-RUN python -m julia.install
-
 # 5) Copiar código
 COPY . .
 

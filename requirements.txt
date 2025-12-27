@@ -106,3 +106,4 @@ urllib3==1.26.16
 wandb==0.15.5
 xxhash==3.3.0
 yarl==1.9.2
+julia
