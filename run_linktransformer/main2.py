@@ -27,9 +27,9 @@ from linktransformer.utils import (
 )
 from linktransformer.infer_main import merge_knn, merge_knn2, merge_knn_hnsw_julia, merge_knn_nmslib
 
-# modelos_a_utilizar = ["sentence-transformers/all-MiniLM-L6-v2", "sentence-transformers/all-mpnet-base-v2", "intfloat/multilingual-e5-large"]
+modelos_a_utilizar = ["sentence-transformers/all-MiniLM-L6-v2", "sentence-transformers/all-mpnet-base-v2", "intfloat/multilingual-e5-large"]
 
-modelos_a_utilizar = ["sentence-transformers/all-MiniLM-L6-v2"]
+# modelos_a_utilizar = ["intfloat/multilingual-e5-large"]
 
 def main():
     # ==========================================
