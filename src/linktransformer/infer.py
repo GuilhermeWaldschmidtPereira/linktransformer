@@ -20,6 +20,11 @@ from transformers import TrainingArguments, Trainer
 from linktransformer.main_svs import VamanaIndexer
 import time
 
+PATH_RESULTADOS = os.path.join(os.path.dirname(__file__), "resultados")
+
+if not os.path.exists(PATH_RESULTADOS):
+    os.makedirs(PATH_RESULTADOS)
+
 
 def merge(
     df1: DataFrame,
@@ -815,11 +820,23 @@ def merge_knn2(
     num_execucoes = 3
     soma_tempo_busca = 0
 
+    df_tempos_busca = pd.DataFrame(columns=["execucao", "tempo_busca", "modelo_index"])
+
     for i in range(num_execucoes):
         start_search_time = time.time()
         I, D = index.search(embeddings2, k)
         search_time = time.time() - start_search_time
         soma_tempo_busca += search_time
+
+        nova_linha = pd.DataFrame([{
+            "execucao": i + 1,
+            "tempo_busca": search_time,
+            "modelo_index": "svs_knn"
+        }])
+
+        df_tempos_busca = pd.concat([df_tempos_busca, nova_linha], ignore_index=True)
+
+    df_tempos_busca.to_csv(os.path.join(PATH_RESULTADOS, "tempos_busca.csv"), index=False)
 
     ## Check nearest neighbor of the first text in df1 as a test
     df1 = df1.reset_index(drop=True)

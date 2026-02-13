@@ -23,7 +23,25 @@ from linktransformer.main_svs import VamanaIndexer
 import time
 import nmslib
 
-def merge_knn(k, df1,df2, suffixes) -> DataFrame:
+PATH_RESULTADOS = os.path.join(os.path.dirname(__file__), "resultados")
+
+if not os.path.exists(PATH_RESULTADOS):
+    os.makedirs(PATH_RESULTADOS)
+
+NAME_DF_RESULTADOS_GERAL = "resultados_geral.csv"
+PATH_RESULTADOS_GERAL = os.path.join(PATH_RESULTADOS, NAME_DF_RESULTADOS_GERAL)
+
+df_geral = pd.DataFrame(columns=[
+    "execucao",
+    "tempo_busca",
+    "memoria_usada_busca_MB",
+    "modelo_index",
+    "modelo_embedding",
+])
+
+df_geral.to_csv(PATH_RESULTADOS_GERAL, index=False)
+
+def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     # ================================
     #     INDEXAÇÃO (FAISS)
     # ================================
@@ -56,6 +74,12 @@ def merge_knn(k, df1,df2, suffixes) -> DataFrame:
     I = None
     soma_qtde_mem = 0.0
 
+    dict_ = {
+        "execucao": [],
+        "tempo_busca": [],
+        "memoria_usada_busca_MB": [],
+    }
+
     print("Searching index")
     for i in range(num_execucoes):
         start_search_time = time.time()
@@ -66,9 +90,25 @@ def merge_knn(k, df1,df2, suffixes) -> DataFrame:
         search_time = time.time() - start_search_time
         soma_tempo_busca += search_time
 
+        dict_["execucao"].append(i+1)
+        dict_["tempo_busca"].append(search_time)
+        dict_["memoria_usada_busca_MB"].append(mem_used_search)
+
+
     avg_search_time = soma_tempo_busca / num_execucoes
     avg_mem_used_search = mem_used_search / num_execucoes
     print(f"Tempo médio de busca (FAISS) em {num_execucoes} execuções: {avg_search_time:.4f} segundos")
+
+    df_tempos_busca_faiss_baseline = pd.DataFrame(dict_)
+    df_tempos_busca_faiss_baseline['modelo_index'] = 'faiss_baseline'
+    print(model)
+
+    df_tempos_busca_faiss_baseline['modelo_embedding'] = model
+
+    df_aux = pd.read_csv(PATH_RESULTADOS_GERAL)
+    df_aux = pd.concat([df_aux, df_tempos_busca_faiss_baseline], ignore_index=True)
+    df_aux.to_csv(PATH_RESULTADOS_GERAL, index=False)
+
 
     ## Check nearest neighbor of the first text in df1 as a test
     df1 = df1.reset_index(drop=True)
@@ -133,7 +173,7 @@ def merge_knn(k, df1,df2, suffixes) -> DataFrame:
 
     return df_lm_matched
 
-def merge_knn2(k, df1, df2, suffixes) -> DataFrame:
+def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     """
     Versão SVS/Vamana no mesmo padrão da merge_knn (FAISS):
 
@@ -188,6 +228,13 @@ def merge_knn2(k, df1, df2, suffixes) -> DataFrame:
     I = None
     D = None
 
+    dict_ = {
+        "execucao": [],
+        "tempo_busca": [],
+        "memoria_usada_busca_MB": [],
+    }
+
+
     print("Searching SVS index")
     for i in range(num_execucoes):
         start_search_time = time.time()
@@ -200,8 +247,20 @@ def merge_knn2(k, df1, df2, suffixes) -> DataFrame:
         search_time = time.time() - start_search_time
         soma_tempo_busca += search_time
 
+        dict_["execucao"].append(i+1)
+        dict_["tempo_busca"].append(search_time)
+        dict_["memoria_usada_busca_MB"].append(mem_used_search)
+
     avg_search_time = soma_tempo_busca / num_execucoes
     avg_mem_used_search = soma_qtde_mem / num_execucoes
+
+    df_tempos_busca_svs = pd.DataFrame(dict_)
+    df_tempos_busca_svs['modelo_index'] = 'svs'
+    df_tempos_busca_svs['modelo_embedding'] = model
+
+    df_aux = pd.read_csv(PATH_RESULTADOS_GERAL)
+    df_aux = pd.concat([df_aux, df_tempos_busca_svs], ignore_index=True)
+    df_aux.to_csv(PATH_RESULTADOS_GERAL, index=False)
 
     # ================================
     #     MERGE FUZZY
@@ -262,7 +321,7 @@ def merge_knn2(k, df1, df2, suffixes) -> DataFrame:
 
     return df_lm_matched
 
-def merge_knn_hnsw_julia(k, df1, df2, suffixes) -> DataFrame:
+def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     """
     Versão HNSW (Julia) no mesmo padrão da merge_knn (FAISS):
 
@@ -309,6 +368,12 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes) -> DataFrame:
     I = None
     D = None
     soma_memoria_usada = 0.0
+    
+    dict_ = {
+        "execucao": [],
+        "tempo_busca": [],
+        "memoria_usada_busca_MB": [],
+    }
 
     for i in range(num_execucoes):
         start_search_time = time.time()
@@ -320,6 +385,19 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes) -> DataFrame:
         soma_memoria_usada += mem_used_search
         search_time = time.time() - start_search_time
         soma_tempo_busca += tempo_busca  # ou search_time, se preferir consistência
+
+        dict_["execucao"].append(i+1)
+        dict_["tempo_busca"].append(tempo_busca)
+        dict_["memoria_usada_busca_MB"].append(mem_used_search)
+
+    df_tempos_busca_hnsw_julia = pd.DataFrame(dict_)
+    df_tempos_busca_hnsw_julia['modelo_index'] = 'hnsw_julia'
+    df_tempos_busca_hnsw_julia['modelo_embedding'] = model
+
+    df_aux = pd.read_csv(PATH_RESULTADOS_GERAL)
+    df_aux = pd.concat([df_aux, df_tempos_busca_hnsw_julia], ignore_index=True)
+    df_aux.to_csv(PATH_RESULTADOS_GERAL, index=False)
+
     # Julia costuma retornar índices 1-based
     I = I - 1
 
@@ -379,7 +457,7 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes) -> DataFrame:
 
     return df_lm_matched
 
-def merge_knn_nmslib(k, df1, df2, suffixes) -> DataFrame:
+def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     """
     Versão NMSLIB (HNSW) no mesmo padrão da merge_knn (FAISS):
 
@@ -440,6 +518,12 @@ def merge_knn_nmslib(k, df1, df2, suffixes) -> DataFrame:
     distances = None
     soma_qtde_mem = 0.0
 
+    dict_ = {
+        "execucao": [],
+        "tempo_busca": [],
+        "memoria_usada_busca_MB": [],
+    }
+
     for i in range(num_execucoes):
         start_search_time = time.time()
         mem_before = process.memory_info().rss / (1024 ** 2)  # MB
@@ -451,9 +535,23 @@ def merge_knn_nmslib(k, df1, df2, suffixes) -> DataFrame:
         soma_tempo_busca += search_time
         neighbors, distances = zip(*res)
 
+        dict_["execucao"].append(i+1)
+        dict_["tempo_busca"].append(search_time)
+        dict_["memoria_usada_busca_MB"].append(mem_used_search)
+
+
     avg_search_time = soma_tempo_busca / num_execucoes
     avg_mem_used_search = soma_qtde_mem / num_execucoes
     print(f"Tempo médio de busca (NMSLIB HNSW) em {num_execucoes} execuções: {avg_search_time:.4f} segundos")
+
+    df_tempos_busca_nmslib_hnsw = pd.DataFrame(dict_)
+    df_tempos_busca_nmslib_hnsw['modelo_index'] = 'nmslib_hnsw'
+    df_tempos_busca_nmslib_hnsw['modelo_embedding'] = model
+
+    df_aux = pd.read_csv(PATH_RESULTADOS_GERAL)
+    df_aux = pd.concat([df_aux, df_tempos_busca_nmslib_hnsw], ignore_index=True)
+    df_aux.to_csv(PATH_RESULTADOS_GERAL, index=False)
+
 
     I = np.vstack(neighbors)       # indices em df2
     D_dist = np.vstack(distances)  # distâncias

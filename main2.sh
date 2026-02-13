@@ -28,23 +28,23 @@ echo "Venv ScaNN:  ${VENV_SCANN}"
     python-jl my_npy_demo/run_with_npy.py
 
     # Execute Julia script
-    python-jl hnsw_julia/run_linktransformer_hnsw_julia.py
+    # python-jl hnsw_julia/run_linktransformer_hnsw_julia.py
 
-    python-jl run_linktransformer/main.py
+    # python-jl run_linktransformer/main.py
 
-    python-jl run_linktransformer/main_nmslib.py
+    # python-jl run_linktransformer/main_nmslib.py
 
 )
 
 ########################################
 # 2) venv_scann - algoritmo ScaNN
 ########################################
-(
-  echo ">>> Ativando venv_scann..."
-  source "${VENV_SCANN}/bin/activate"
+# (
+#   echo ">>> Ativando venv_scann..."
+#   source "${VENV_SCANN}/bin/activate"
 
-  echo ">>> Rodando ScaNN..."
-  python "${PROJECT_ROOT}/run_linktransformer/main_scann.py"
-)
+#   echo ">>> Rodando ScaNN..."
+#   python "${PROJECT_ROOT}/run_linktransformer/main_scann.py"
+# )
 
 echo ">>> FIM de todos os experimentos."

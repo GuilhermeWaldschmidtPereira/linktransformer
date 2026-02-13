@@ -1,1 +1,2 @@
 metodo,index_time,search_time,total_time,num_rows_df1,num_rows_df2,k
+svs_knn,0.04626154899597168,0.00020877520243326822,0.046470324198404946,10,10,1
