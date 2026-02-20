@@ -101,7 +101,6 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
 
     df_tempos_busca_faiss_baseline = pd.DataFrame(dict_)
     df_tempos_busca_faiss_baseline['modelo_index'] = 'faiss_baseline'
-    print(model)
 
     df_tempos_busca_faiss_baseline['modelo_embedding'] = model
 
@@ -110,21 +109,13 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     df_aux.to_csv(PATH_RESULTADOS_GERAL, index=False)
 
 
-    ## Check nearest neighbor of the first text in df1 as a test
     df1 = df1.reset_index(drop=True)
     df2 = df2.reset_index(drop=True)
 
-    ## Fuzzily merge the dfs based on the faiss index queries
-    ### Each I sublst is a list of k nearest neighbors for each row in df1 in terms of indices of df2
-    ### We need to expand the rows of df1 and df2 to match the number of rows in df1
-    ### We also need to expand the scores to match the number of rows in df1
+    # expandir df1 e df2 como na merge_knn
+    df1_expanded = df2.loc[np.repeat(df2.index.values, k)].reset_index(drop=True)
+    df2_expanded = df1.iloc[I.flatten()].reset_index(drop=True)    
 
-    ### First, expand the rows of df1
-    df1_expanded = df1.loc[np.repeat(df1.index.values, k)].reset_index(drop=True)
-    ### Now, expand the rows of df2
-    df2_expanded = df2.iloc[I.flatten()].reset_index(drop=True)
-
-    ### Now, merge the expanded dfs
     df_lm_matched = df1_expanded.merge(
         df2_expanded,
         left_index=True,
@@ -133,26 +124,34 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
         suffixes=suffixes,
     )
 
-    ### Add score column
-    df_lm_matched["score"] = D.flatten()
-
-    if None is not None:
-        df_lm_matched = df_lm_matched[df_lm_matched["score"] >= None]
-        print(f"Dropped rows with similarity below {None}")
-
     print(
         f"LM matched on key columns - left: {None}{suffixes[0]}, "
         f"right: {None}{suffixes[1]}"
     )
 
+    safe_model = str(model).replace(os.sep, "_")
+    if os.path.altsep:
+        safe_model = safe_model.replace(os.path.altsep, "_")
+
+    PATH_RESULTADOS_baseline = f"resultados/baseline/{safe_model}"
+
     # ================================
     #   SALVAR RESULTADOS DE TEMPO
     # ================================
+    if not os.path.exists(PATH_RESULTADOS_baseline):
+        os.makedirs(PATH_RESULTADOS_baseline)
+
+    RESULTADO_DE_TEMPO = f"csv_final_tempos_buscas.csv"
+    df_aux.to_csv(os.path.join(PATH_RESULTADOS_baseline, RESULTADO_DE_TEMPO), index=False)
+
+    # ================================
+    #   SALVAR MÉDIAS DOS RESULTADOS
+    # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-
+    matches = (df_lm_matched["id_lt_x"] == df_lm_matched["id_lt_y"]).sum()
     results_data = {
-        "metodo": ["faiss_knn"],
+        "metodo": ["baseline"],
         "index_time": [index_time],
         "search_time": [avg_search_time],
         "total_time": [total_time],
@@ -161,6 +160,7 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
         "k": [k],
         "mem_used_indexation_MB": [mem_used_create_index],
         "avg_mem_used_search_MB": [avg_mem_used_search],
+        "matches": [matches],
     }
     results_df = pd.DataFrame(results_data)
 
@@ -169,9 +169,7 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     else:
         results_df.to_csv(results_file, mode="w", header=True, index=False)
 
-    print(f"Resultados (FAISS) salvos em {results_file}")
-
-    return df_lm_matched
+    return True
 
 def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     """
@@ -203,16 +201,15 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     mem_before = process.memory_info().rss / (1024 ** 2)  # MB
     
     index = class_svs.build(
-        base_embeddings=embeddings1,        # base indexada (df2)
-        reduced_dims=128,                   # projeção para 128D
-        graph_max_degree=64,                # M (grau máximo do grafo)
-        window_size=128,                    # janela para construção
-        distance=svs.DistanceType.L2,       # métrica L2
-        num_threads=4,                      # paralelismo
+        base_embeddings=embeddings1,
+        reduced_dims=256,
+        graph_max_degree=96,
+        window_size=200,
+        distance=svs.DistanceType.L2,
+        num_threads=4,
         primary_kind=svs.LeanVecKind.lvq4,
         secondary_kind=svs.LeanVecKind.lvq8,
-    )
-    
+    )    
     mem_after = process.memory_info().rss / (1024 ** 2)  # MB
     mem_used_create_index = mem_after - mem_before
     print(f"Memória utilizada na indexação (SVS): {mem_used_create_index:.2f} MB")
@@ -269,8 +266,8 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     df2 = df2.reset_index(drop=True)
 
     # expandir df1 e df2 como na merge_knn
-    df1_expanded = df1.loc[np.repeat(df1.index.values, k)].reset_index(drop=True)
-    df2_expanded = df2.iloc[I.flatten()].reset_index(drop=True)
+    df1_expanded = df2.loc[np.repeat(df2.index.values, k)].reset_index(drop=True)
+    df2_expanded = df1.iloc[I.flatten()].reset_index(drop=True)    
 
     df_lm_matched = df1_expanded.merge(
         df2_expanded,
@@ -284,23 +281,34 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     # por agora seguimos o padrão e usamos D "cru" como score:
     df_lm_matched["score"] = D.flatten()
 
-    # (mantendo o padrão da merge_knn: sem threshold explícito)
-    # if None is not None:
-    #     df_lm_matched = df_lm_matched[df_lm_matched["score"] >= None]
-
     print(
         f"LM matched (SVS) - left: {None}{suffixes[0]}, "
         f"right: {None}{suffixes[1]}"
     )
 
+    safe_model = str(model).replace(os.sep, "_")
+    if os.path.altsep:
+        safe_model = safe_model.replace(os.path.altsep, "_")
+
+    PATH_RESULTADOS_SVS = f"resultados/svs/{safe_model}"
+
     # ================================
     #   SALVAR RESULTADOS DE TEMPO
     # ================================
+    if not os.path.exists(PATH_RESULTADOS_SVS):
+        os.makedirs(PATH_RESULTADOS_SVS)
+
+    RESULTADO_DE_TEMPO = f"csv_final_tempos_buscas.csv"
+    df_aux.to_csv(os.path.join(PATH_RESULTADOS_SVS, RESULTADO_DE_TEMPO), index=False)
+
+    # ================================
+    #   SALVAR MÉDIAS DOS RESULTADOS
+    # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-
+    matches = (df_lm_matched["id_lt_x"] == df_lm_matched["id_lt_y"]).sum()
     results_data = {
-        "metodo": ["svs_knn"],
+        "metodo": ["svs"],
         "index_time": [index_time],
         "search_time": [avg_search_time],
         "total_time": [total_time],
@@ -309,6 +317,7 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
         "k": [k],
         "mem_used_indexation_MB": [mem_used_create_index],
         "avg_mem_used_search_MB": [avg_mem_used_search],
+        "matches": [matches],
     }
     results_df = pd.DataFrame(results_data)
 
@@ -317,9 +326,7 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     else:
         results_df.to_csv(results_file, mode="w", header=True, index=False)
 
-    print(f"Resultados (SVS) salvos em {results_file}")
-
-    return df_lm_matched
+    return True
 
 def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     """
@@ -411,8 +418,9 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     df1 = df1.reset_index(drop=True)
     df2 = df2.reset_index(drop=True)
 
-    df1_expanded = df1.loc[np.repeat(df1.index.values, k)].reset_index(drop=True)
-    df2_expanded = df2.iloc[I.flatten()].reset_index(drop=True)
+    # expandir df1 e df2 como na merge_knn
+    df1_expanded = df2.loc[np.repeat(df2.index.values, k)].reset_index(drop=True)
+    df2_expanded = df1.iloc[I.flatten()].reset_index(drop=True)    
 
     df_lm_matched = df1_expanded.merge(
         df2_expanded,
@@ -429,12 +437,27 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
         f"right: {None}{suffixes[1]}"
     )
 
+    safe_model = str(model).replace(os.sep, "_")
+    if os.path.altsep:
+        safe_model = safe_model.replace(os.path.altsep, "_")
+
+    PATH_RESULTADOS_hnsw_julia = f"resultados/hnsw_julia/{safe_model}"
+
     # ================================
     #   SALVAR RESULTADOS DE TEMPO
     # ================================
+    if not os.path.exists(PATH_RESULTADOS_hnsw_julia):
+        os.makedirs(PATH_RESULTADOS_hnsw_julia)
+
+    RESULTADO_DE_TEMPO = f"csv_final_tempos_buscas.csv"
+    df_aux.to_csv(os.path.join(PATH_RESULTADOS_hnsw_julia, RESULTADO_DE_TEMPO), index=False)
+
+    # ================================
+    #   SALVAR MÉDIAS DOS RESULTADOS
+    # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-
+    matches = (df_lm_matched["id_lt_x"] == df_lm_matched["id_lt_y"]).sum()
     results_data = {
         "metodo": ["hnsw_julia"],
         "index_time": [index_time],
@@ -445,6 +468,7 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
         "k": [k],
         "mem_used_indexation_MB": [mem_used_create_index],
         "avg_mem_used_search_MB": [avg_mem_used_search],
+        "matches": [matches],
     }
     results_df = pd.DataFrame(results_data)
 
@@ -453,9 +477,7 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     else:
         results_df.to_csv(results_file, mode="w", header=True, index=False)
 
-    print(f"Resultados (HNSW Julia) salvos em {results_file}")
-
-    return df_lm_matched
+    return True
 
 def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     """
@@ -494,8 +516,8 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
 
     index.createIndex(
         {
-            "M": 16,
-            "efConstruction": 200,
+            "M": 48,
+            "efConstruction": 600,
         },
         print_progress=False,
     )
@@ -565,8 +587,9 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     df1 = df1.reset_index(drop=True)
     df2 = df2.reset_index(drop=True)
 
-    df1_expanded = df1.loc[np.repeat(df1.index.values, k)].reset_index(drop=True)
-    df2_expanded = df2.iloc[I.flatten()].reset_index(drop=True)
+    # expandir df1 e df2 como na merge_knn
+    df1_expanded = df2.loc[np.repeat(df2.index.values, k)].reset_index(drop=True)
+    df2_expanded = df1.iloc[I.flatten()].reset_index(drop=True)    
 
     df_lm_matched = df1_expanded.merge(
         df2_expanded,
@@ -583,14 +606,29 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
         f"right: {None}{suffixes[1]}"
     )
 
+    safe_model = str(model).replace(os.sep, "_")
+    if os.path.altsep:
+        safe_model = safe_model.replace(os.path.altsep, "_")
+
+    PATH_RESULTADOS_NMSLIB = f"resultados/NMSLIB/{safe_model}"
+
     # ================================
     #   SALVAR RESULTADOS DE TEMPO
     # ================================
+    if not os.path.exists(PATH_RESULTADOS_NMSLIB):
+        os.makedirs(PATH_RESULTADOS_NMSLIB)
+
+    RESULTADO_DE_TEMPO = f"csv_final_tempos_buscas.csv"
+    df_aux.to_csv(os.path.join(PATH_RESULTADOS_NMSLIB, RESULTADO_DE_TEMPO), index=False)
+
+    # ================================
+    #   SALVAR MÉDIAS DOS RESULTADOS
+    # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-
+    matches = (df_lm_matched["id_lt_x"] == df_lm_matched["id_lt_y"]).sum()
     results_data = {
-        "metodo": ["nmslib_hnsw"],
+        "metodo": ["NMSLIB"],
         "index_time": [index_time],
         "search_time": [avg_search_time],
         "total_time": [total_time],
@@ -599,7 +637,9 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
         "k": [k],
         "mem_used_indexation_MB": [mem_used_create_index],
         "avg_mem_used_search_MB": [avg_mem_used_search],
+        "matches": [matches],
     }
+
     results_df = pd.DataFrame(results_data)
 
     if os.path.exists(results_file):
@@ -607,9 +647,7 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     else:
         results_df.to_csv(results_file, mode="w", header=True, index=False)
 
-    print(f"Resultados (NMSLIB HNSW) salvos em {results_file}")
-
-    return df_lm_matched
+    return True
 
 def merge_knn_scann(k, df1, df2, suffixes) -> DataFrame:
     """
