@@ -148,8 +148,8 @@ def main():
         emb_dir = os.path.join(THIS_DIR, "embeddings")
         os.makedirs(emb_dir, exist_ok=True)
 
-        np.save(os.path.join(f"{data_dir}/embeddings_query.npy"), embeddings1.astype(np.float32))
-        np.save(os.path.join(f"{data_dir}/embeddings_base.npy"), embeddings2.astype(np.float32))
+        np.save(os.path.join(f"{data_dir}/embeddings_base.npy"), embeddings1.astype(np.float32))
+        np.save(os.path.join(f"{data_dir}/embeddings_query.npy"), embeddings2.astype(np.float32))
 
         print(f"Embeddings salvos em: {emb_dir}")
         
@@ -177,10 +177,11 @@ def main():
         df1.loc[:, "id_lt"] = np.arange(len(df1))
         df2.loc[:, "id_lt"] = np.arange(len(df2))
 
-    merge_knn(1, df1, df2, suffixes)
+    k = 3
+    # merge_knn(1, df1, df2, suffixes)
     merge_knn2(1, df1, df2, suffixes)
-    merge_knn_nmslib(1, df1, df2, suffixes)
-    merge_knn_hnsw_julia(1, df1, df2, suffixes)
+    # merge_knn_nmslib(1, df1, df2, suffixes)
+    # merge_knn_hnsw_julia(1, df1, df2, suffixes)
     
 
 if __name__ == "__main__":

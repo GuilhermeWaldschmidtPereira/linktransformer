@@ -1,0 +1,101 @@
+id_x,nome_x,id_lt_x,id_y,nome_y,id_lt_y,score
+1,R. eas Acácias,0,2532,Conjunto das Acácias,2531,0.48236978
+2,Avennnidb Brasil,1,1687,Avenida Velha,1686,0.74479586
+3,Rua do Sol,2,3,Rua do Sol,2,3.106344e-05
+4,TTTrv. Central,3,3576,Praça Central,3575,0.9144685
+5,R. dddas Flores,4,5438,Estrada das Palmeiras,5437,1.0480847
+6,Al. Atlântica,5,177,Avenida Jardim Encantado,176,1.0761839
+7,Rua Nova Esperança,6,7,Rua Nova Esperança,6,3.23473e-05
+8,R. Bela Vista,7,6420,Rua Serra Alta,6419,0.9371885
+9,Rua Projetada A,8,9,Rua Projetada A,8,3.6276455e-05
+10,Rh Tiradentes,9,7010,Rua do Bosque,7009,1.0396787
+11,Al. Ceeentral,10,1118,Estrada dos Lírios,1117,0.88970655
+12,Conjunto dos Coqueirooou,11,7612,Conjunto da Esperança,7611,0.5971652
+13,Largo Monte BBBelo,12,13,Largo Monte Belo,12,0.14195454
+14,Travessa dooos Lirios,13,14,Travessa dos Lírios,13,0.16906993
+15,Rzdovia das Mangueiras,14,15,Rodovia das Mangueiras,14,0.19270137
+16,Praca Jardim Encanwado,15,16,Praça Jardim Encantado,15,0.079391
+17,Av. do Progresso,16,9516,Praça do Progresso,9515,0.6745277
+18,Est. do Booosque,17,156,Praça do Bosque,155,0.85074615
+19,Residencial Horizonte Azul,18,19,Residencial Horizonte Azul,18,4.2785603e-05
+20,R. dos Ipês,19,5402,Conjunto dos Ipês,5401,0.6874596
+21,Al. Nottta,20,2147,Avenida Velha,2146,0.9865019
+22,Conjunto da Esperaaanca,21,22,Conjunto da Esperança,21,0.021999508
+23,Largo São Jdão,22,23,Largo São João,22,0.21034364
+24,Trv. dos Jacarrrandas,23,3924,Travessa dos Lírios,3923,0.59073985
+25,Rod. das Acacias,24,3635,Rodovia dos Jacarandás,3634,0.8933897
+26,Praça Serra Alta,25,26,Praça Serra Alta,25,2.8000035e-05
+27,Avenida da Paz,26,367,Avenida da Esperança,366,0.5989746
+28,Est. do Campq,27,3422,Conjunto do Bosque,3421,0.8906399
+29,Residencial   Vale Verde,28,29,Residencial Vale Verde,28,2.658258e-05
+30,Rha da Liberdade,29,30,Rua da Liberdade,29,0.16028336
+31,Al. Velhaaa,30,31,Alameda Velha,30,0.49595642
+32,Conjunto Flor dr   Campo,31,32,Conjunto Flor do Campo,31,0.13091826
+33,Largo das Palmeiraaas,32,33,Largo das Palmeiras,32,0.01760367
+34,Travessa Central,33,34,Travessa Central,33,3.3867193e-05
+35,Rod. dos Coqueiros,34,35,Rodovia dos Coqueiros,34,0.3166106
+36,sraca Monte Belo,35,36,Praça Monte Belo,35,0.14915285
+37,Avvv. dos Lirios,36,83,Largo dos Lírios,82,0.68458647
+38,Estradaidas Mangueiras,37,38,Estrada das Mangueiras,37,0.23506407
+39,Residencial JardimsEncantado,38,39,Residencial Jardim Encantado,38,0.04459856
+40,Ruavdo Progresso,39,9820,Rua da Esperança,9819,0.64839005
+41,Al. do Bosque,40,4319,Residencial do Bosque,4318,0.6384254
+42,Conjunto Horxzonte Azul,41,62,Conjunto Jardim Encantado,61,0.6113298
+43,Larro dos Ipês,42,43,Largo dos Ipês,42,0.28238678
+44,Tov. Nova,43,44,Travessa Nova,43,0.61261374
+45,Rod. da Esperança,44,45,Rodovia da Esperança,44,0.21172051
+46,Praca Saaao Joho,45,5436,Praça Velha,5435,0.48874283
+47,AAAvenida dos Jacarandas,46,47,Avenida dos Jacarandás,46,0.17870517
+48,Est. das Acácias,47,6042,Conjunto Jardim Encantado,6041,0.98365325
+49,Residencial Serra Alta,48,49,Residencial Serra Alta,48,1.9447252e-05
+50,Rua ga Paz,49,50,Rua da Paz,49,0.118030556
+51,Alameda do Campooo,50,51,Alameda do Campo,50,0.09263961
+52,Conjunto Vale Verrrde,51,7552,Conjunto Velha,7551,0.5648007
+53,Lavgo da Liberdade,52,76,Praça da Liberdade,75,0.42204398
+54,Travessa Velha,53,54,Travessa Velha,53,2.0961224e-05
+55,Rod. Flor do Campo,54,55,Rodovia Flor do Campo,54,0.27830008
+56,Pracaaa das halmeiras,55,5926,Praça das Mangueiras,5925,0.54732347
+57,Aa. Central,56,5738,Estrada Central,5737,0.6672439
+58,Estradq dos   Coqueiros,57,4336,Praça dos Coqueiros,4335,0.41350734
+59,Residencial Monte Belo,58,59,Residencial Monte Belo,58,2.6374317e-05
+60,Rua dos Lirios,59,106,Praça dos Lírios,105,0.56859934
+61,Alameda das Mangujiras,60,61,Alameda das Mangueiras,60,0.1238401
+62,Conjjjunto Jardim Encantado,61,62,Conjunto Jardim Encantado,61,0.073517814
+63,Largo do trrrogresso,62,633,Largo dos Coqueiros,632,0.46343523
+64,Travessa do Bosiue,63,64,Travessa do Bosque,63,0.106103465
+65,RRRod. Horizonte Azul,64,65,Rodovia Horizonte Azul,64,0.28730607
+66,Pracf dos Ipes,65,66,Praça dos Ipês,65,0.24400638
+67,Aw. Nova,66,6553,Largo Nova,6552,0.5566087
+68,Estraaada da Esperanca,67,6830,Rua da Esperança,6829,0.39726478
+69,Rlsidencccial Sao Joao,68,69,Residencial São João,68,0.28681555
+70,R. dos Jacarandás,69,70,Rua dos Jacarandás,69,0.2045405
+71,Alameddda das Acácias,70,7071,Alameda das Palmeiras,7070,0.85201085
+72,Conjunto Serra Alta,71,72,Conjunto Serra Alta,71,1.9692423e-05
+73,Largo da Paz,72,73,Largo da Paz,72,2.7034013e-05
+74,Travessa do Campo,73,74,Travessa do Campo,73,1.6280334e-05
+75,Rpdovia Vale Veeerde,74,7635,Rodovia da Esperança,7634,0.63868624
+76,Praca da Liberdade,75,76,Praça da Liberdade,75,2.1831589e-05
+77,Avencda Velha,76,77,Avenida Velha,76,0.05252032
+78,Estrada Flor do Ckmpo,77,78,Estrada Flor do Campo,77,0.24019855
+79,Residenciiial das Palmeiras,78,79,Residencial das Palmeiras,78,0.07963924
+80,Rua Cnntral,79,6540,Rua Velha,6539,0.5680543
+81,Al. dos Coqueiiiros,80,863,Largo dos Coqueiros,862,0.54531056
+82,Conjunto Monte Belo,81,82,Conjunto Monte Belo,81,1.9913132e-05
+83,Largo dos Lírios,82,83,Largo dos Lírios,82,2.5916877e-05
+84,Trv. das Mangueiras,83,84,Travessa das Mangueiras,83,0.1306272
+85,Rodovia Jardim Encantado,84,85,Rodovia Jardim Encantado,84,2.7841765e-05
+86,Praca do Progresso,85,86,Praça do Progresso,85,2.596069e-05
+87,Av. do Bosque,86,87,Avenida do Bosque,86,0.43331838
+88,Estrada Horizonte Azul,87,88,Estrada Horizonte Azul,87,2.1636766e-05
+89,Residencigl dos Ipes,88,89,Residencial dos Ipês,88,0.22596145
+90,Rua Nova,89,90,Rua Nova,89,3.9042483e-05
+91,Al. da Esperanca,90,91,Alameda da Esperança,90,0.2270956
+92,Conjunto Sao Joav,91,9452,Conjunto da Esperança,9451,0.41314787
+93,Largo dos Jacarandas,92,93,Largo dos Jacarandás,92,2.3049664e-05
+94,brv. das Acáciasss,93,9440,Rua das Palmeiras,9439,0.7347617
+95,Rodovia Serra Alta,94,95,Rodovia Serra Alta,94,2.315858e-05
+96,Praca da Paz,95,96,Praça da Paz,95,2.169362e-05
+97,Av. do Campo,96,9826,Praça do Campo,9825,0.50459576
+98,Estrada Vale Verddde,97,98,Estrada Vale Verde,97,0.25735185
+99,Residencial da Liberdade,98,99,Residencial da Liberdade,98,1.9803381e-05
+100,R. Velha,99,100,Rua Velha,99,0.34238613
