@@ -142,7 +142,7 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
         os.makedirs(PATH_RESULTADOS_baseline)
 
     RESULTADO_DE_TEMPO = f"csv_final_tempos_buscas.csv"
-    df_aux.to_csv(os.path.join(PATH_RESULTADOS_baseline, RESULTADO_DE_TEMPO), index=False)
+    df_tempos_busca_faiss_baseline.to_csv(os.path.join(PATH_RESULTADOS_baseline, RESULTADO_DE_TEMPO), index=False)
 
     # ================================
     #   SALVAR MÉDIAS DOS RESULTADOS
@@ -152,6 +152,7 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     matches = (df_lm_matched["id_lt_x"] == df_lm_matched["id_lt_y"]).sum()
     results_data = {
         "metodo": ["baseline"],
+        "modelo_embedding": [model],
         "index_time": [index_time],
         "search_time": [avg_search_time],
         "total_time": [total_time],
@@ -299,7 +300,7 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
         os.makedirs(PATH_RESULTADOS_SVS)
 
     RESULTADO_DE_TEMPO = f"csv_final_tempos_buscas.csv"
-    df_aux.to_csv(os.path.join(PATH_RESULTADOS_SVS, RESULTADO_DE_TEMPO), index=False)
+    df_tempos_busca_svs.to_csv(os.path.join(PATH_RESULTADOS_SVS, RESULTADO_DE_TEMPO), index=False)
 
     # ================================
     #   SALVAR MÉDIAS DOS RESULTADOS
@@ -309,6 +310,7 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     matches = (df_lm_matched["id_lt_x"] == df_lm_matched["id_lt_y"]).sum()
     results_data = {
         "metodo": ["svs"],
+        "modelo_embedding": [model],
         "index_time": [index_time],
         "search_time": [avg_search_time],
         "total_time": [total_time],
@@ -450,7 +452,7 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
         os.makedirs(PATH_RESULTADOS_hnsw_julia)
 
     RESULTADO_DE_TEMPO = f"csv_final_tempos_buscas.csv"
-    df_aux.to_csv(os.path.join(PATH_RESULTADOS_hnsw_julia, RESULTADO_DE_TEMPO), index=False)
+    df_tempos_busca_hnsw_julia.to_csv(os.path.join(PATH_RESULTADOS_hnsw_julia, RESULTADO_DE_TEMPO), index=False)
 
     # ================================
     #   SALVAR MÉDIAS DOS RESULTADOS
@@ -460,6 +462,7 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     matches = (df_lm_matched["id_lt_x"] == df_lm_matched["id_lt_y"]).sum()
     results_data = {
         "metodo": ["hnsw_julia"],
+        "modelo_embedding": [model],
         "index_time": [index_time],
         "search_time": [avg_search_time],
         "total_time": [total_time],
@@ -619,7 +622,7 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
         os.makedirs(PATH_RESULTADOS_NMSLIB)
 
     RESULTADO_DE_TEMPO = f"csv_final_tempos_buscas.csv"
-    df_aux.to_csv(os.path.join(PATH_RESULTADOS_NMSLIB, RESULTADO_DE_TEMPO), index=False)
+    df_tempos_busca_nmslib_hnsw.to_csv(os.path.join(PATH_RESULTADOS_NMSLIB, RESULTADO_DE_TEMPO), index=False)
 
     # ================================
     #   SALVAR MÉDIAS DOS RESULTADOS
@@ -629,6 +632,7 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     matches = (df_lm_matched["id_lt_x"] == df_lm_matched["id_lt_y"]).sum()
     results_data = {
         "metodo": ["NMSLIB"],
+        "modelo_embedding": [model],
         "index_time": [index_time],
         "search_time": [avg_search_time],
         "total_time": [total_time],
