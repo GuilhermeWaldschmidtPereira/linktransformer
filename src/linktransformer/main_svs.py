@@ -66,6 +66,18 @@ class VamanaIndexer:
         - graph_max_degree (R), window_size (alpha) do Vamana.
         - distance: svs.DistanceType.L2, etc.
         """
+        print(
+            "build() parâmetros:",
+            {
+            "reduced_dims": reduced_dims,
+            "graph_max_degree": graph_max_degree,
+            "window_size": window_size,
+            "distance": distance,
+            "num_threads": num_threads,
+            "primary_kind": primary_kind,
+            "secondary_kind": secondary_kind,
+            },
+        )
         base = np.asarray(base_embeddings, dtype=np.float32, order="C")
         if base.ndim != 2:
             raise ValueError(f"base_embeddings deve ter shape (N, D); recebido {base.shape}.")

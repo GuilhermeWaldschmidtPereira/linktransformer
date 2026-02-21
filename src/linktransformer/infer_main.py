@@ -149,6 +149,7 @@ def merge_knn2(k, df1, df2, suffixes) -> DataFrame:
     embeddings1 = np.load("../data/embeddings_base.npy")   # mesmos arquivos da merge_knn
     embeddings2 = np.load("../data/embeddings_query.npy")
 
+
     # ================================
     #     INDEXAÇÃO (SVS / Vamana)
     # ================================
@@ -202,6 +203,11 @@ def merge_knn2(k, df1, df2, suffixes) -> DataFrame:
 
     avg_search_time = soma_tempo_busca / num_execucoes
     avg_mem_used_search = soma_qtde_mem / num_execucoes
+    
+    cont_acerto = 0
+    for i in range(len(I)):
+        if i == I[i][0]:  # se o vizinho mais próximo é o próprio índice
+            cont_acerto += 1
 
     # ================================
     #     MERGE FUZZY
@@ -210,8 +216,8 @@ def merge_knn2(k, df1, df2, suffixes) -> DataFrame:
     df2 = df2.reset_index(drop=True)
 
     # expandir df1 e df2 como na merge_knn
-    df1_expanded = df1.loc[np.repeat(df1.index.values, k)].reset_index(drop=True)
-    df2_expanded = df2.iloc[I.flatten()].reset_index(drop=True)
+    df1_expanded = df2.loc[np.repeat(df2.index.values, k)].reset_index(drop=True)
+    df2_expanded = df1.iloc[I.flatten()].reset_index(drop=True)    
 
     df_lm_matched = df1_expanded.merge(
         df2_expanded,
@@ -220,10 +226,17 @@ def merge_knn2(k, df1, df2, suffixes) -> DataFrame:
         how="inner",
         suffixes=suffixes,
     )
-
     # D aqui costuma ser distância (L2); se quiser pode transformar em similaridade
     # por agora seguimos o padrão e usamos D "cru" como score:
     df_lm_matched["score"] = D.flatten()
+
+    df_lm_matched.to_csv("df_lm_matched_svs.csv", index=False)
+
+    if "id_lt_x" in df_lm_matched.columns and "id_lt_y" in df_lm_matched.columns:
+        iguais = df_lm_matched["id_lt_x"].eq(df_lm_matched["id_lt_y"])
+        print(f"id_lt_x == id_lt_y: {iguais.mean():.2%} ({iguais.sum()}/{len(iguais)})")
+    else:
+        warnings.warn("Colunas id_lt_x e/ou id_lt_y não encontradas em df_lm_matched.")
 
     # (mantendo o padrão da merge_knn: sem threshold explícito)
     # if None is not None:
