@@ -29,7 +29,7 @@ from linktransformer.infer_main import merge_knn, merge_knn2, merge_knn_hnsw_jul
 
 modelos_a_utilizar = [
                         "sentence-transformers/all-MiniLM-L6-v2", 
-                        "sentence-transformers/all-mpnet-base-v2", 
+                        # "sentence-transformers/all-mpnet-base-v2", 
                         # "intfloat/multilingual-e5-large",
                         # "neuralmind/bert-large-portuguese-cased"
                     ]
@@ -94,8 +94,8 @@ def main():
 
         df1.loc[:, "id_lt"] = np.arange(len(df1))
         df2.loc[:, "id_lt"] = np.arange(len(df2))
-        
-        if (os.path.exists(embeddings_query_path) and os.path.exists(embeddings_base_path)):
+
+        if  not (os.path.exists(embeddings_query_path) and os.path.exists(embeddings_base_path)):
             print(f"Embeddings não encontrados. Serão gerados novamente.")
 
             # -------------------------
@@ -187,10 +187,11 @@ def main():
             df1.loc[:, "id_lt"] = np.arange(len(df1))
             df2.loc[:, "id_lt"] = np.arange(len(df2))
 
-        merge_knn(1, df1, df2, suffixes, modelo)
-        merge_knn2(1, df1, df2, suffixes, modelo)
-        merge_knn_nmslib(1, df1, df2, suffixes, modelo)
-        # merge_knn_hnsw_julia(1, df1, df2, suffixes, modelo)
+        k = 10
+        merge_knn(k, df1, df2, suffixes, modelo)
+        merge_knn2(k, df1, df2, suffixes, modelo)
+        # merge_knn_nmslib(k, df1, df2, suffixes, modelo)
+        # merge_knn_hnsw_julia(k, df1, df2, suffixes, modelo)
     
 if __name__ == "__main__":
     main()
