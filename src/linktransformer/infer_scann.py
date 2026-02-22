@@ -8,183 +8,130 @@ from typing import Union, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from pandas import DataFrame
+import psutil
 
 from linktransformer.utils import *
 
+PATH_RESULTADOS = os.path.join(os.path.dirname(__file__), "resultados")
+
+if not os.path.exists(PATH_RESULTADOS):
+    os.makedirs(PATH_RESULTADOS)
+
+NAME_DF_resultados_scann = "resultados_scann.csv"
+PATH_resultados_scann = os.path.join(PATH_RESULTADOS, NAME_DF_resultados_scann)
+
+df_geral = pd.DataFrame(columns=[
+    "execucao",
+    "tempo_busca",
+    "memoria_usada_busca_MB",
+    "modelo_index",
+    "modelo_embedding",
+])
+
+df_geral.to_csv(PATH_resultados_scann, index=False)
 
 def merge_knn_scann(
-    df1: DataFrame,
-    df2: DataFrame,
-    on: Optional[Union[str, List[str]]] = None,
-    model: Union[str, LinkTransformer] = "all-MiniLM-L6-v2",
-    left_on: Optional[Union[str, List[str]]] = None,
-    right_on: Optional[Union[str, List[str]]] = None,
-    k: int = 1,
-    suffixes: Tuple[str, str] = ("_x", "_y"),
-    batch_size: int = 128,
-    openai_key: Optional[str] = None,
-    drop_sim_threshold: float = None,
+    k, 
+    df1,
+    df2, 
+    suffixes, 
+    model,
 ) -> DataFrame:
-    """
-    Merge two dataframes using language model embeddings and ScaNN as k-NN index.
 
-    - df2 vira a base indexada (database).
-    - df1 gera as queries.
-    - ScaNN usa dot_product em embeddings normalizados.
-    - Tempos de index/search são salvos em resultados.csv.
+    embeddings1 = np.load("data/embeddings_base.npy")
+    embeddings2 = np.load("data/embeddings_query.npy")
 
-    Implementação sem sklearn, compatível com numpy>=2.
-    """
+    df1 = df1.copy().reset_index(drop=True)
+    df2 = df2.copy().reset_index(drop=True)
 
-    # -------------------------
-    # 1) Preparar colunas e IDs
-    # -------------------------
-    if on is None:
-        on = list(set(df1.columns).intersection(set(df2.columns)))
+    df1["id_lt"] = np.arange(len(df1))
+    df2["id_lt"] = np.arange(len(df2))
 
-    if left_on is None:
-        left_on = on
-    if right_on is None:
-        right_on = on
 
-    # não usamos mais "on" diretamente
-    on = None
-
-    df1 = df1.copy()
-    df2 = df2.copy()
-
-    if "id_lt" in df1.columns:
-        raise ValueError("Column id_lt already exists in df1, please rename it to proceed")
-    if "id_lt" in df2.columns:
-        raise ValueError("Column id_lt already exists in df2, please rename it to proceed")
-
-    df1.loc[:, "id_lt"] = np.arange(len(df1))
-    df2.loc[:, "id_lt"] = np.arange(len(df2))
-
-    if isinstance(right_on, list):
-        strings_right = serialize_columns(df2, right_on, model=model)
-    if isinstance(left_on, list):
-        strings_left = serialize_columns(df1, left_on, model=model)
-    else:
-        # caso simples: uma única coluna em cada lado
-        strings_left = df1[left_on].tolist()
-        strings_right = df2[right_on].tolist()
-
-    # -------------------------
-    # 2) Carregar modelo e embeddings
-    # -------------------------
-    if isinstance(model, str):
-        if openai_key is None:
-            model = load_model(model)
-
-    embeddings1 = infer_embeddings(
-        strings_left,
-        model,
-        batch_size=batch_size,
-        openai_key=openai_key,
-        return_numpy=True,
-    )
-    embeddings2 = infer_embeddings(
-        strings_right,
-        model,
-        batch_size=batch_size,
-        openai_key=openai_key,
-        return_numpy=True,
-    )
-
-    if len(embeddings1.shape) == 1:
-        embeddings1 = np.expand_dims(embeddings1, axis=0)
-    if len(embeddings2.shape) == 1:
-        embeddings2 = np.expand_dims(embeddings2, axis=0)
-
-    # Normaliza embeddings -> ScaNN com "dot_product" ~ cosine similarity
     embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
     embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
 
-    # -------------------------
-    # 3) Construir índice ScaNN (modo adaptativo)
-    # -------------------------
+    # ================================
+    # 3) INDEXAÇÃO (ScaNN)
+    # ================================
     import scann
+
+    process = psutil.Process(os.getpid())
+    mem_before = process.memory_info().rss / (1024 ** 2)
 
     start_index_time = time.time()
 
-    n_points = embeddings2.shape[0]
-
-    # parâmetros "base" pensados para bases grandes
-    base_num_leaves = 2000
-    base_num_leaves_to_search = 100
-
-    # adapta ao tamanho real
-    num_leaves = max(min(base_num_leaves, n_points), 1)
-    num_leaves_to_search = min(base_num_leaves_to_search, num_leaves)
-
     builder = scann.scann_ops_pybind.builder(
-        embeddings2,      # base indexada (df2)
-        k,                # número de vizinhos
-        "dot_product",    # métrica
-    )
-
-    usa_tree = n_points > 1
-    usa_ah = n_points >= 64  # só ativa asymmetric hashing em bases razoavelmente grandes
-
-    if usa_tree:
-        builder = builder.tree(
-            num_leaves=num_leaves,
-            num_leaves_to_search=num_leaves_to_search,
-        )
-
-    # EXATAMENTE 1 entre score_ah e score_brute_force
-    if usa_ah:
-        builder = builder.score_ah(
-            2,
-            anisotropic_quantization_threshold=0.2,
-        ).reorder(100)
-    else:
-        # brute force + reorder (reorder aqui é redundante, mas mantém a assinatura)
-        builder = builder.score_brute_force().reorder(100)
+        embeddings1,
+        k,
+        "dot_product",
+    ).score_brute_force()
 
     searcher = builder.build()
 
     index_time = time.time() - start_index_time
-    print(
-        f"[ScaNN] índice criado em {index_time:.6f} s | "
-        f"n_points={n_points}, num_leaves={num_leaves}, "
-        f"num_leaves_to_search={num_leaves_to_search}, "
-        f"usa_tree={usa_tree}, usa_AH={usa_ah}"
-    )
 
-    # -------------------------
-    # 4) Buscar k-NN com ScaNN
-    # -------------------------
-    num_execucoes = 3
+    mem_after = process.memory_info().rss / (1024 ** 2)
+    mem_used_create_index = mem_after - mem_before
+
+    print(f"[ScaNN] Indexação: {index_time:.4f}s | Memória: {mem_used_create_index:.2f} MB")
+
+    # ================================
+    # 4) BUSCA KNN (100 execuções)
+    # ================================
+    num_execucoes = 100
     soma_tempo_busca = 0.0
-    I = None
-    D = None
+    soma_memoria = 0.0
+
+    dict_ = {
+        "execucao": [],
+        "tempo_busca": [],
+        "memoria_usada_busca_MB": [],
+    }
 
     for i in range(num_execucoes):
+
+        mem_before = process.memory_info().rss / (1024 ** 2)
         start_search_time = time.time()
-        # search_batched retorna (neighbors, distances/scores)
+
         I, D = searcher.search_batched(
-            embeddings1,
+            embeddings2,
             final_num_neighbors=k,
         )
+
         search_time = time.time() - start_search_time
+        mem_after = process.memory_info().rss / (1024 ** 2)
+
+        mem_used_search = mem_after - mem_before
+
         soma_tempo_busca += search_time
+        soma_memoria += mem_used_search
+
+        dict_["execucao"].append(i + 1)
+        dict_["tempo_busca"].append(search_time)
+        dict_["memoria_usada_busca_MB"].append(mem_used_search)
 
     avg_search_time = soma_tempo_busca / num_execucoes
-    print(
-        f"[ScaNN] tempo médio de busca em {num_execucoes} execuções: "
-        f"{avg_search_time:.6f} s"
-    )
+    avg_mem_used_search = soma_memoria / num_execucoes
 
-    # -------------------------
-    # 5) Merge fuzzy com os DataFrames
-    # -------------------------
-    df1 = df1.reset_index(drop=True)
-    df2 = df2.reset_index(drop=True)
+    print(f"[ScaNN] Busca média: {avg_search_time:.4f}s")
 
-    df1_expanded = df1.loc[np.repeat(df1.index.values, k)].reset_index(drop=True)
-    df2_expanded = df2.iloc[I.flatten()].reset_index(drop=True)
+    # ================================
+    # 5) LOG DETALHADO GLOBAL
+    # ================================
+    df_tempos_busca_scann = pd.DataFrame(dict_)
+    df_tempos_busca_scann["modelo_index"] = "scann"
+    df_tempos_busca_scann["modelo_embedding"] = str(model)
+
+    df_aux = pd.read_csv(PATH_resultados_scann)
+    df_aux = pd.concat([df_aux, df_tempos_busca_scann], ignore_index=True)
+    df_aux.to_csv(PATH_resultados_scann, index=False)
+
+    # ================================
+    # 6) MERGE RESULTADO
+    # ================================
+    df1_expanded = df2.loc[np.repeat(df2.index.values, k)].reset_index(drop=True)
+    df2_expanded = df1.iloc[I.flatten()].reset_index(drop=True)
 
     df_lm_matched = df1_expanded.merge(
         df2_expanded,
@@ -194,39 +141,52 @@ def merge_knn_scann(
         suffixes=suffixes,
     )
 
-    df_lm_matched["score"] = D.flatten()  # dot-product similarity
+    df_lm_matched.to_csv(os.path.join(PATH_RESULTADOS, f"matched_scann.csv"), index=False)
 
-    if drop_sim_threshold is not None:
-        df_lm_matched = df_lm_matched[df_lm_matched["score"] >= drop_sim_threshold]
-        print(f"Dropped rows with similarity below {drop_sim_threshold}")
+    # ================================
+    # 7) SALVAR RESULTADOS INDIVIDUAIS
+    # ================================
+    safe_model = str(model).replace(os.sep, "_")
+    if os.path.altsep:
+        safe_model = safe_model.replace(os.path.altsep, "_")
 
-    print(
-        f"LM matched on key columns - left: {left_on}{suffixes[0]}, "
-        f"right: {right_on}{suffixes[1]}"
+    PATH_RESULTADOS_scann = f"resultados/scann/{safe_model}"
+
+    if not os.path.exists(PATH_RESULTADOS_scann):
+        os.makedirs(PATH_RESULTADOS_scann)
+
+    df_tempos_busca_scann.to_csv(
+        os.path.join(PATH_RESULTADOS_scann, "csv_final_tempos_buscas.csv"),
+        index=False
     )
 
-    # -------------------------
-    # 6) Salvar tempos em resultados.csv
-    # -------------------------
-    results_file = "resultados.csv"
+    # ================================
+    # 8) SALVAR MÉDIAS (results.csv)
+    # ================================
     total_time = index_time + avg_search_time
+    matches = (df_lm_matched["id_x"] == df_lm_matched["id_y"]).sum()
 
     results_data = {
-        "metodo": ["scann_knn"],
+        "metodo": ["scann"],
+        "modelo_embedding": [str(model)],
         "index_time": [index_time],
         "search_time": [avg_search_time],
         "total_time": [total_time],
         "num_rows_df1": [len(df1)],
         "num_rows_df2": [len(df2)],
         "k": [k],
+        "mem_used_indexation_MB": [mem_used_create_index],
+        "avg_mem_used_search_MB": [avg_mem_used_search],
+        "matches": [matches],
     }
+
     results_df = pd.DataFrame(results_data)
+
+    results_file = "resultados.csv"
 
     if os.path.exists(results_file):
         results_df.to_csv(results_file, mode="a", header=False, index=False)
     else:
         results_df.to_csv(results_file, mode="w", header=True, index=False)
 
-    print(f"Results (ScaNN) saved to {results_file}")
-
-    return df_lm_matched
+    return True

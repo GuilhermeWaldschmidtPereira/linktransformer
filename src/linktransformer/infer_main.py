@@ -47,8 +47,8 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     # ================================
     # Medir tempo de criação do índice + add
 
-    embeddings1 = np.load("../data/embeddings_base.npy")
-    embeddings2 = np.load("../data/embeddings_query.npy")
+    embeddings1 = np.load("data/embeddings_base.npy")
+    embeddings2 = np.load("data/embeddings_query.npy")
 
     start_index_time = time.time()
     process = psutil.Process(os.getpid())
@@ -80,7 +80,6 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
         "memoria_usada_busca_MB": [],
     }
 
-    print("Searching index")
     for i in range(num_execucoes):
         start_search_time = time.time()
         mem_before = process.memory_info().rss / (1024 ** 2)  # MB
@@ -149,7 +148,7 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-    matches = (df_lm_matched["id_lt_x"] == df_lm_matched["id_lt_y"]).sum()
+    matches = (df_lm_matched["id_x"] == df_lm_matched["id_y"]).sum()
     results_data = {
         "metodo": ["baseline"],
         "modelo_embedding": [model],
@@ -176,7 +175,7 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     """
     Versão SVS/Vamana no mesmo padrão da merge_knn (FAISS):
 
-    - Lê embeddings pré-computados de ../data/embeddings_base.npy e ../data/embeddings_query.npy
+    - Lê embeddings pré-computados de data/embeddings_base.npy e data/embeddings_query.npy
     - Constrói índice SVS sobre a base (query) e busca k-NN para a outra
     - Faz o merge fuzzy df1 x df2
     - Salva tempos em resultados.csv com metodo = "svs_knn"
@@ -185,8 +184,8 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     #     CARREGAR EMBEDDINGS
     # ================================
-    embeddings1 = np.load("../data/embeddings_base.npy")   # mesmos arquivos da merge_knn
-    embeddings2 = np.load("../data/embeddings_query.npy")
+    embeddings1 = np.load("data/embeddings_base.npy")   # mesmos arquivos da merge_knn
+    embeddings2 = np.load("data/embeddings_query.npy")
 
     # ================================
     #     INDEXAÇÃO (SVS / Vamana)
@@ -202,15 +201,17 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     mem_before = process.memory_info().rss / (1024 ** 2)  # MB
     
     index = class_svs.build(
-        base_embeddings=embeddings1,
-        reduced_dims=256,
-        graph_max_degree=96,
-        window_size=200,
-        distance=svs.DistanceType.L2,
-        num_threads=4,
+        base_embeddings=embeddings1,        # base indexada (df2)
+        reduced_dims=128,                   # projeção para 128D
+        graph_max_degree=64,                # M (grau máximo do grafo)
+        window_size=128,                    # janela para construção
+        distance=svs.DistanceType.L2,       # métrica L2
+        num_threads=4,                      # paralelismo
         primary_kind=svs.LeanVecKind.lvq4,
         secondary_kind=svs.LeanVecKind.lvq8,
-    )    
+    )
+
+    
     mem_after = process.memory_info().rss / (1024 ** 2)  # MB
     mem_used_create_index = mem_after - mem_before
     print(f"Memória utilizada na indexação (SVS): {mem_used_create_index:.2f} MB")
@@ -282,6 +283,8 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     # por agora seguimos o padrão e usamos D "cru" como score:
     df_lm_matched["score"] = D.flatten()
 
+    df_lm_matched.to_csv(f"df_lm_matched_svs.csv", index=False)
+
     print(
         f"LM matched (SVS) - left: {None}{suffixes[0]}, "
         f"right: {None}{suffixes[1]}"
@@ -307,7 +310,7 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-    matches = (df_lm_matched["id_lt_x"] == df_lm_matched["id_lt_y"]).sum()
+    matches = (df_lm_matched["id_x"] == df_lm_matched["id_y"]).sum()
     results_data = {
         "metodo": ["svs"],
         "modelo_embedding": [model],
@@ -334,7 +337,7 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     """
     Versão HNSW (Julia) no mesmo padrão da merge_knn (FAISS):
 
-    - Lê embeddings pré-computados de ../data/embeddings_base.npy e ../data/embeddings_query.npy
+    - Lê embeddings pré-computados de data/embeddings_base.npy e data/embeddings_query.npy
     - Constrói o índice HNSW em Julia sobre a base (df2 / embeddings_query)
     - Faz busca k-NN para df1
     - Faz merge fuzzy df1 x df2
@@ -343,8 +346,8 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     #     CARREGAR EMBEDDINGS
     # ================================
-    embeddings1 = np.load("../data/embeddings_base.npy")   # df1
-    embeddings2 = np.load("../data/embeddings_query.npy")  # df2
+    embeddings1 = np.load("data/embeddings_base.npy")   # df1
+    embeddings2 = np.load("data/embeddings_query.npy")  # df2
 
     # Normalizar (Julia HNSW geralmente trabalha com L2/cosseno)
     embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
@@ -354,7 +357,7 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     #     INDEXAÇÃO (HNSW em Julia)
     # ================================
     # Importante: ajustar caminho conforme a estrutura do projeto
-    Main.include("../hnsw_julia/hnsw_wrapper.jl")
+    Main.include("hnsw_julia/hnsw_wrapper.jl")
 
     # Indexar a BASE = df2 / embeddings2, igual ao padrão FAISS/SVS/NMSLIB
     start_index_time = time.time()
@@ -459,7 +462,7 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-    matches = (df_lm_matched["id_lt_x"] == df_lm_matched["id_lt_y"]).sum()
+    matches = (df_lm_matched["id_x"] == df_lm_matched["id_y"]).sum()
     results_data = {
         "metodo": ["hnsw_julia"],
         "modelo_embedding": [model],
@@ -486,7 +489,7 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     """
     Versão NMSLIB (HNSW) no mesmo padrão da merge_knn (FAISS):
 
-    - Lê embeddings pré-computados de ../data/embeddings_base.npy e ../data/embeddings_query.npy
+    - Lê embeddings pré-computados de data/embeddings_base.npy e data/embeddings_query.npy
     - Constrói índice HNSW (nmslib) sobre df2 / embeddings_query
     - Busca k-NN para df1
     - Faz merge fuzzy df1 x df2
@@ -496,8 +499,8 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     #     CARREGAR EMBEDDINGS
     # ================================
-    embeddings1 = np.load("../data/embeddings_base.npy")   # df1
-    embeddings2 = np.load("../data/embeddings_query.npy")  # df2
+    embeddings1 = np.load("data/embeddings_base.npy")   # df1
+    embeddings2 = np.load("data/embeddings_query.npy")  # df2
 
     # Normalizar para cosinesimil
     embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
@@ -629,7 +632,7 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-    matches = (df_lm_matched["id_lt_x"] == df_lm_matched["id_lt_y"]).sum()
+    matches = (df_lm_matched["id_x"] == df_lm_matched["id_y"]).sum()
     results_data = {
         "metodo": ["NMSLIB"],
         "modelo_embedding": [model],
@@ -657,7 +660,7 @@ def merge_knn_scann(k, df1, df2, suffixes) -> DataFrame:
     """
     Versão ScaNN no mesmo padrão da merge_knn (FAISS):
 
-    - Lê embeddings pré-computados de ../data/embeddings_base.npy e ../data/embeddings_query.npy
+    - Lê embeddings pré-computados de data/embeddings_base.npy e data/embeddings_query.npy
     - Constrói índice ScaNN sobre df2 / embeddings_query
     - Faz busca k-NN para df1
     - Faz merge fuzzy df1 x df2
@@ -668,8 +671,8 @@ def merge_knn_scann(k, df1, df2, suffixes) -> DataFrame:
     # ================================
     #     CARREGAR EMBEDDINGS
     # ================================
-    embeddings1 = np.load("../data/embeddings_base.npy")   # df1
-    embeddings2 = np.load("../data/embeddings_query.npy")  # df2
+    embeddings1 = np.load("data/embeddings_base.npy")   # df1
+    embeddings2 = np.load("data/embeddings_query.npy")  # df2
 
     # Normalizar (ScaNN + dot_product ≈ cosine)
     embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
