@@ -37,9 +37,18 @@ def merge_knn_scann(
     suffixes, 
     model,
 ) -> DataFrame:
+    # ================================
+    safe_model = str(model).replace(os.sep, "_")
+    if os.path.altsep:
+        safe_model = safe_model.replace(os.path.altsep, "_")
 
-    embeddings1 = np.load("data/embeddings_base.npy")
-    embeddings2 = np.load("data/embeddings_query.npy")
+    PATH_RESULTADOS_scann = f"resultados/scann/{safe_model}"
+    safe_model = str(model).replace(os.sep, "_")
+    if os.path.altsep:
+        safe_model = safe_model.replace(os.path.altsep, "_")
+
+    embeddings1 = np.load(f"data/embeddings_base_{safe_model}.npy")
+    embeddings2 = np.load(f"data/embeddings_query_{safe_model}.npy")
 
     df1 = df1.copy().reset_index(drop=True)
     df2 = df2.copy().reset_index(drop=True)

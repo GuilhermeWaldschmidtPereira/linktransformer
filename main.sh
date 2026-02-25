@@ -10,7 +10,7 @@ sudo touch "$SCRIPT_DIR/resultados.csv"
 
 sudo chown gpereira:users "$SCRIPT_DIR/resultados.csv"
 
-echo "metodo,index_time,search_time,total_time,num_rows_df1,num_rows_df2,k" > "$SCRIPT_DIR/resultados.csv"
+echo "metodo,modelo_embedding,index_time,search_time,total_time,num_rows_df1,num_rows_df2,k,mem_used_indexation_MB,avg_mem_used_search_MB,matches" > "$SCRIPT_DIR/resultados.csv"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

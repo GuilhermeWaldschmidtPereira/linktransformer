@@ -100,7 +100,7 @@ def main():
         df1.loc[:, "id_lt"] = np.arange(len(df1))
         df2.loc[:, "id_lt"] = np.arange(len(df2))
 
-        if (os.path.exists(embeddings_query_path) and os.path.exists(embeddings_base_path)):
+        if not (os.path.exists(embeddings_query_path) and os.path.exists(embeddings_base_path)):
             print(f"Embeddings não encontrados. Serão gerados novamente.")
 
             # -------------------------
@@ -195,7 +195,7 @@ def main():
         k = 5
         for i in range(k):
             if i > 0:
-                merge_knn_scann(k, df1, df2, suffixes, modelo)
+                merge_knn_scann(i, df1, df2, suffixes, modelo)
     
 
 if __name__ == "__main__":

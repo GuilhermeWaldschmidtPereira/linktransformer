@@ -46,9 +46,12 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     #     INDEXAÇÃO (FAISS)
     # ================================
     # Medir tempo de criação do índice + add
+    safe_model = str(model).replace(os.sep, "_")
+    if os.path.altsep:
+        safe_model = safe_model.replace(os.path.altsep, "_")
 
-    embeddings1 = np.load("data/embeddings_base.npy")
-    embeddings2 = np.load("data/embeddings_query.npy")
+    embeddings1 = np.load(f"data/embeddings_base_{safe_model}.npy")
+    embeddings2 = np.load(f"data/embeddings_query_{safe_model}.npy")
 
     start_index_time = time.time()
     process = psutil.Process(os.getpid())
@@ -184,8 +187,12 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     #     CARREGAR EMBEDDINGS
     # ================================
-    embeddings1 = np.load("data/embeddings_base.npy")   # mesmos arquivos da merge_knn
-    embeddings2 = np.load("data/embeddings_query.npy")
+    safe_model = str(model).replace(os.sep, "_")
+    if os.path.altsep:
+        safe_model = safe_model.replace(os.path.altsep, "_")
+
+    embeddings1 = np.load(f"data/embeddings_base_{safe_model}.npy")
+    embeddings2 = np.load(f"data/embeddings_query_{safe_model}.npy")
 
     # ================================
     #     INDEXAÇÃO (SVS / Vamana)
@@ -346,8 +353,12 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     #     CARREGAR EMBEDDINGS
     # ================================
-    embeddings1 = np.load("data/embeddings_base.npy")   # df1
-    embeddings2 = np.load("data/embeddings_query.npy")  # df2
+    safe_model = str(model).replace(os.sep, "_")
+    if os.path.altsep:
+        safe_model = safe_model.replace(os.path.altsep, "_")
+
+    embeddings1 = np.load(f"data/embeddings_base_{safe_model}.npy")
+    embeddings2 = np.load(f"data/embeddings_query_{safe_model}.npy")
 
     # Normalizar (Julia HNSW geralmente trabalha com L2/cosseno)
     embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
@@ -499,8 +510,12 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     #     CARREGAR EMBEDDINGS
     # ================================
-    embeddings1 = np.load("data/embeddings_base.npy")   # df1
-    embeddings2 = np.load("data/embeddings_query.npy")  # df2
+    safe_model = str(model).replace(os.sep, "_")
+    if os.path.altsep:
+        safe_model = safe_model.replace(os.path.altsep, "_")
+
+    embeddings1 = np.load(f"data/embeddings_base_{safe_model}.npy")
+    embeddings2 = np.load(f"data/embeddings_query_{safe_model}.npy")
 
     # Normalizar para cosinesimil
     embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
