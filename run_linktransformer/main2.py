@@ -94,8 +94,8 @@ def main():
         for i in range(k):
             if i > 0:
                 merge_knn(i, df1, df2, suffixes, modelo)
-                merge_knn2(i, df1, df2, suffixes, modelo)
-                merge_knn_nmslib(i, df1, df2, suffixes, modelo)
+                #merge_knn2(i, df1, df2, suffixes, modelo)
+                #merge_knn_nmslib(i, df1, df2, suffixes, modelo)
                 # merge_knn_hnsw_julia(i, df1, df2, suffixes, modelo)
 
 def build_embedding():
@@ -210,6 +210,8 @@ def build_embedding():
     
 if __name__ == "__main__":
 
-    # build_embedding()
+    # Gera os embeddings da base de dados (Vai gerar 4 embeddings, um para cada modelo)
+    build_embedding()
 
+    # Roda os processamentos já com os embeddings (Vai executar para cada embedding e para cada modelo, vamos utilizar apenas o ScaNN e o Linktransformer)
     main()
