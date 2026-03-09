@@ -208,5 +208,4 @@ python -m pip install -r requirements_scann.txt
 
 # Autor
 
-Projeto desenvolvido no contexto de experimentos de avaliação de métodos
-de indexação vetorial para tarefas de geocodificação e record linkage.
+Guilherme Waldschmidt Pereira
