@@ -58,6 +58,51 @@ Verifique a versão instalada:
 python3.11 --version
 ```
 
+
+## Preparação dos Dados
+
+Para a execução dos experimentos de *matching* textual, os campos de endereço foram concatenados em uma única string.
+
+Originalmente, os dados estavam estruturados em múltiplos campos:
+
+```
+rua | bairro | numero
+```
+
+Exemplo da estrutura original:
+
+```
+rua: Av. Brasil
+bairro: Centro
+numero: 123
+```
+
+Após a concatenação, o endereço passa a ser representado como:
+
+```
+Av. Brasil Centro 123
+```
+
+Essa representação foi utilizada como entrada para a geração dos *embeddings* textuais utilizados no processo de *matching* entre as bases.
+
+As bases de dados utilizadas nos experimentos devem estar armazenadas em arquivos `.csv` no diretório:
+
+```
+/data
+```
+
+O pipeline espera encontrar **dois arquivos específicos** nesse diretório:
+
+```
+enderecos_base.csv
+enderecos_query.csv
+```
+
+onde:
+
+- **enderecos_base.csv**: contém a base de registros utilizada para indexação.
+- **enderecos_query.csv**: contém os registros utilizados como consultas no processo de busca vetorial.
+
 ------------------------------------------------------------------------
 
 # Criação dos Ambientes Virtuais
