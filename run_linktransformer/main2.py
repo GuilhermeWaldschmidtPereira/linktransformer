@@ -28,9 +28,9 @@ from linktransformer.utils import (
 from linktransformer.infer_main import merge_knn, merge_knn2, merge_knn_hnsw_julia, merge_knn_nmslib
 
 modelos_a_utilizar = [
-                        # "sentence-transformers/all-MiniLM-L6-v2", 
-                        # "sentence-transformers/all-mpnet-base-v2", 
-                        # "intfloat/multilingual-e5-large",
+                        "sentence-transformers/all-MiniLM-L6-v2", 
+                        "sentence-transformers/all-mpnet-base-v2", 
+                        "intfloat/multilingual-e5-large",
                         "neuralmind/bert-large-portuguese-cased"
                     ]
 
@@ -40,8 +40,8 @@ modelos_a_utilizar = [
 # 2) Ler os CSV de endereços
 # ==========================================
 data_dir = os.path.join(THIS_DIR, "../data")
-base_path = os.path.join(data_dir, "enderecos_10000.csv")
-query_path = os.path.join(data_dir, "enderecos_100_ruido.csv")
+base_path = os.path.join(data_dir, "enderecos_base.csv")
+query_path = os.path.join(data_dir, "enderecos_query.csv")
 
 if not os.path.exists(base_path):
     raise FileNotFoundError(f"Não encontrei {base_path}")
