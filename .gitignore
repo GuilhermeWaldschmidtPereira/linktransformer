@@ -37,7 +37,6 @@ env/
 ENV/
 env.bak/
 venv.bak/
-*.npy
 *.png
 *.csv
 *.jpg
