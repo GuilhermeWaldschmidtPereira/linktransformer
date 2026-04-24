@@ -46,8 +46,8 @@ def main():
     # 2) Ler os CSV de endereços
     # ==========================================
     data_dir = os.path.join(THIS_DIR, "../data")
-    base_path = os.path.join(data_dir, "enderecos_10000.csv")
-    query_path = os.path.join(data_dir, "enderecos_100_ruido.csv")
+    base_path = os.path.join(data_dir, "cnefe_layout_setor_esperado.csv")
+    query_path = os.path.join(data_dir, "cnefe_layout_setor_esperado.csv")
 
     if not os.path.exists(base_path):
         raise FileNotFoundError(f"Não encontrei {base_path}")
@@ -192,7 +192,7 @@ def main():
             df1.loc[:, "id_lt"] = np.arange(len(df1))
             df2.loc[:, "id_lt"] = np.arange(len(df2))
 
-        k = 5
+        k = 2
         for i in range(k):
             if i > 0:
                 merge_knn_scann(i, df1, df2, suffixes, modelo)

@@ -151,7 +151,8 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-    matches = (df_lm_matched["id_x"] == df_lm_matched["id_y"]).sum()
+    df_lm_matched.to_csv('teste.csv')
+    matches = (df_lm_matched["setor_esperado_x"] == df_lm_matched["setor_esperado_y"]).sum()
     results_data = {
         "metodo": ["baseline"],
         "modelo_embedding": [model],
@@ -317,7 +318,7 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-    matches = (df_lm_matched["id_x"] == df_lm_matched["id_y"]).sum()
+    matches = (df_lm_matched["setor_esperado_x"] == df_lm_matched["setor_esperado_y"]).sum()
     results_data = {
         "metodo": ["svs"],
         "modelo_embedding": [model],
@@ -473,7 +474,7 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-    matches = (df_lm_matched["id_x"] == df_lm_matched["id_y"]).sum()
+    matches = (df_lm_matched["setor_esperado_x"] == df_lm_matched["setor_esperado_y"]).sum()
     results_data = {
         "metodo": ["hnsw_julia"],
         "modelo_embedding": [model],
@@ -647,7 +648,7 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-    matches = (df_lm_matched["id_x"] == df_lm_matched["id_y"]).sum()
+    matches = (df_lm_matched["setor_esperado_x"] == df_lm_matched["setor_esperado_y"]).sum()
     results_data = {
         "metodo": ["NMSLIB"],
         "modelo_embedding": [model],
