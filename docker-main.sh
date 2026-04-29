@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-set -e  # se qualquer comando falhar, o script para
+set -e
 
-# Create results file
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LOG_DIR="${SCRIPT_DIR}/logs"
+LOG_FILE="${LOG_DIR}/docker-main.log"
 
-# Criar o resultados.csv no mesmo diretório do script
+mkdir -p "${LOG_DIR}"
+
+exec > >(tee -a "${LOG_FILE}") 2>&1
+
 rm -f "$SCRIPT_DIR/resultados.csv"
 touch "$SCRIPT_DIR/resultados.csv"
 
@@ -15,12 +19,6 @@ if command -v id >/dev/null 2>&1; then
 fi
 
 echo "metodo,modelo_embedding,index_time,search_time,total_time,num_rows_df1,num_rows_df2,k,mem_used_indexation_MB,avg_mem_used_search_MB,matches" > "$SCRIPT_DIR/resultados.csv"
-
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-VENV_SCANN="$HOME/venv_scann"
-
-echo "Venv ScaNN:  ${VENV_SCANN}"
 
 if command -v python-jl >/dev/null 2>&1; then
     PYTHON_RUNNER="python-jl"
@@ -33,28 +31,7 @@ else
     exit 1
 fi
 
+echo "Log file: ${LOG_FILE}"
+echo "Started at: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "Python runner: ${PYTHON_RUNNER}"
-
-
-########################################
-# 1) venv geral - 4 algoritmos
-########################################
-(
-
-    # Execute Python script
-    "${PYTHON_RUNNER}" "${PROJECT_ROOT}/run_linktransformer/main2.py"
-
-)
-
-########################################
-# 2) venv_scann - algoritmo ScaNN
-########################################
-(
-  echo ">>> Ativando venv_scann..."
-  source "${VENV_SCANN}/bin/activate"
-
-  echo ">>> Rodando ScaNN..."
-  python "${PROJECT_ROOT}/run_linktransformer/main_scann.py"
-)
-
-echo ">>> FIM de todos os experimentos."
+"${PYTHON_RUNNER}" "${SCRIPT_DIR}/run_linktransformer/main2.py"

@@ -9,7 +9,17 @@ import pandas as pd
 import svs
 from typing import Union, List, Optional, Tuple,Dict, Any
 from pandas import DataFrame
-from julia import Julia, Main
+
+try:
+    from julia import Julia, Main
+except ImportError:
+    Julia = None
+    Main = None
+
+try:
+    import nmslib
+except ImportError:
+    nmslib = None
 
 from linktransformer.cluster_fns import cluster
 # from linktransformer.utils import serialize_columns, infer_embeddings, load_model, load_clf, cosine_similarity_corresponding_pairs, tokenize_data_for_inference, predict_rows_with_openai
@@ -804,15 +814,29 @@ def merge_knn2(
     
     # Medir tempo de indexação
     start_index_time = time.time()
+    distance_l2 = getattr(getattr(svs, "DistanceType", None), "L2", None)
+    if distance_l2 is None:
+        distance_l2 = getattr(getattr(svs, "Distance", None), "L2", None)
+    if distance_l2 is None:
+        distance_l2 = "L2"
+
+    primary_kind = getattr(getattr(svs, "LeanVecKind", None), "lvq4", None)
+    if primary_kind is None:
+        primary_kind = "lvq4"
+
+    secondary_kind = getattr(getattr(svs, "LeanVecKind", None), "lvq8", None)
+    if secondary_kind is None:
+        secondary_kind = "lvq8"
+
     index = class_svs.build(
         base_embeddings=embeddings1,
         reduced_dims=128,                  # projeção para 128D
         graph_max_degree=64,               # M (grau máximo do grafo)
         window_size=128,                   # janela para construção
-        distance=svs.DistanceType.L2,      # métrica L2
+        distance=distance_l2,              # métrica L2 (compatível entre versões)
         num_threads=4,                     # paralelismo
-        primary_kind=svs.LeanVecKind.lvq4,
-        secondary_kind=svs.LeanVecKind.lvq8,
+        primary_kind=primary_kind,
+        secondary_kind=secondary_kind,
     )
     index_time = time.time() - start_index_time
     print(f"Tempo de indexação: {index_time:.4f} segundos")
@@ -1259,7 +1283,8 @@ def merge_knn_nmslib(
     # -------------------------
     # Vamos usar espaço de similaridade de cosseno
     # NMSLIB retorna "distâncias" (menor = mais similar).
-    import nmslib
+    if nmslib is None:
+        raise RuntimeError("nmslib não está instalado. Instale com: pip install nmslib")
 
     start_index_time = time.time()
 

@@ -8,7 +8,7 @@ from typing import Union, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from pandas import DataFrame
-import psutil
+import tracemalloc
 
 from linktransformer.utils import *
 
@@ -65,10 +65,8 @@ def merge_knn_scann(
     # ================================
     import scann
 
-    process = psutil.Process(os.getpid())
-    mem_before = process.memory_info().rss / (1024 ** 2)
-
     start_index_time = time.time()
+    tracemalloc.start()
 
     builder = scann.scann_ops_pybind.builder(
         embeddings1,
@@ -79,9 +77,9 @@ def merge_knn_scann(
     searcher = builder.build()
 
     index_time = time.time() - start_index_time
-
-    mem_after = process.memory_info().rss / (1024 ** 2)
-    mem_used_create_index = mem_after - mem_before
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    mem_used_create_index = peak / (1024 ** 2)  # MB
 
     print(f"[ScaNN] Indexação: {index_time:.4f}s | Memória: {mem_used_create_index:.2f} MB")
 
@@ -100,8 +98,8 @@ def merge_knn_scann(
 
     for i in range(num_execucoes):
 
-        mem_before = process.memory_info().rss / (1024 ** 2)
         start_search_time = time.time()
+        tracemalloc.start()
 
         I, D = searcher.search_batched(
             embeddings2,
@@ -109,9 +107,9 @@ def merge_knn_scann(
         )
 
         search_time = time.time() - start_search_time
-        mem_after = process.memory_info().rss / (1024 ** 2)
-
-        mem_used_search = mem_after - mem_before
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        mem_used_search = peak / (1024 ** 2)  # MB
 
         soma_tempo_busca += search_time
         soma_memoria += mem_used_search

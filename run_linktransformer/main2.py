@@ -40,8 +40,8 @@ modelos_a_utilizar = [
 # 2) Ler os CSV de endereços
 # ==========================================
 data_dir = os.path.join(THIS_DIR, "../data")
-base_path = os.path.join(data_dir, "enderecos_base.csv")
-query_path = os.path.join(data_dir, "enderecos_query.csv")
+base_path = os.path.join(data_dir, "cnefe_layout_setor_esperado.csv")
+query_path = os.path.join(data_dir, "cnefe_layout_setor_esperado.csv")
 
 if not os.path.exists(base_path):
     raise FileNotFoundError(f"Não encontrei {base_path}")
@@ -57,6 +57,7 @@ df_query = pd.read_csv(query_path)
 
 def main():
     for modelo in modelos_a_utilizar:
+        print(f"Iniciando processamento para o modelo: {modelo}")
 
         # -------------------------
         # Configurações
@@ -90,13 +91,12 @@ def main():
         model: Union[str, object] = modelo
         suffixes = ("_x", "_y")
 
-        k = 5
-        for i in range(k):
-            if i > 0:
-                merge_knn(i, df1, df2, suffixes, modelo)
-                #merge_knn2(i, df1, df2, suffixes, modelo)
-                #merge_knn_nmslib(i, df1, df2, suffixes, modelo)
-                # merge_knn_hnsw_julia(i, df1, df2, suffixes, modelo)
+        k = 1
+        print(f"Executando baseline com k={k}")
+        merge_knn(k, df1, df2, suffixes, modelo)
+        merge_knn2(k, df1, df2, suffixes, modelo)
+        merge_knn_nmslib(k, df1, df2, suffixes, modelo)
+        merge_knn_hnsw_julia(k, df1, df2, suffixes, modelo)
 
 def build_embedding():
 
@@ -209,7 +209,6 @@ def build_embedding():
             
     
 if __name__ == "__main__":
-
     # Gera os embeddings da base de dados (Vai gerar 4 embeddings, um para cada modelo)
     build_embedding()
 

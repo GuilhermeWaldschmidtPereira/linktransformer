@@ -6,12 +6,10 @@ import warnings
 import faiss
 import numpy as np
 import pandas as pd
-import svs
 from typing import Union, List, Optional, Tuple,Dict, Any
 from pandas import DataFrame
-from julia import Julia, Main
 
-import psutil
+import tracemalloc
 import os
 from linktransformer.cluster_fns import cluster
 # from linktransformer.utils import serialize_columns, infer_embeddings, load_model, load_clf, cosine_similarity_corresponding_pairs, tokenize_data_for_inference, predict_rows_with_openai
@@ -19,9 +17,17 @@ from linktransformer.utils import *
 from sklearn.metrics.pairwise import cosine_similarity
 from itertools import combinations
 from transformers import TrainingArguments, Trainer
-from linktransformer.main_svs import VamanaIndexer
 import time
-import nmslib
+
+try:
+    import nmslib
+except ImportError:
+    nmslib = None
+
+try:
+    import scann
+except ImportError:
+    scann = None
 
 PATH_RESULTADOS = os.path.join(os.path.dirname(__file__), "resultados")
 
@@ -54,20 +60,19 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     embeddings2 = np.load(f"data/embeddings_query_{safe_model}.npy")
 
     start_index_time = time.time()
-    process = psutil.Process(os.getpid())
-    mem_before = process.memory_info().rss / (1024 ** 2)  # MB
-    
+    tracemalloc.start()
+
     index = faiss.IndexFlatIP(embeddings1.shape[1])
     print("Adding embeddings to index")
     index.add(embeddings1)
-    
-    mem_after = process.memory_info().rss / (1024 ** 2)  # MB
-    mem_used_create_index = mem_after - mem_before
+
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    mem_used_create_index = peak / (1024 ** 2)  # MB
     
     index_time = time.time() - start_index_time
     print(f"Memória utilizada na indexação: {mem_used_create_index:.2f} MB")
     print(f"Tempo de indexação (FAISS): {index_time:.4f} segundos")
-
     # ================================
     #     BUSCA KNN (FAISS)
     # ================================
@@ -85,10 +90,12 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
 
     for i in range(num_execucoes):
         start_search_time = time.time()
-        mem_before = process.memory_info().rss / (1024 ** 2)  # MB
+        tracemalloc.start()
         D, I = index.search(embeddings2, k)
-        mem_after = process.memory_info().rss / (1024 ** 2)  # MB
-        mem_used_search = mem_after - mem_before
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        mem_used_search = peak / (1024 ** 2)  # MB
+        soma_qtde_mem += mem_used_search
         search_time = time.time() - start_search_time
         soma_tempo_busca += search_time
 
@@ -98,7 +105,7 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
 
 
     avg_search_time = soma_tempo_busca / num_execucoes
-    avg_mem_used_search = mem_used_search / num_execucoes
+    avg_mem_used_search = soma_qtde_mem / num_execucoes
     print(f"Tempo médio de busca (FAISS) em {num_execucoes} execuções: {avg_search_time:.4f} segundos")
 
     df_tempos_busca_faiss_baseline = pd.DataFrame(dict_)
@@ -151,7 +158,7 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-    matches = (df_lm_matched["id_x"] == df_lm_matched["id_y"]).sum()
+    matches = (df_lm_matched["setor_esperado_x"] == df_lm_matched["setor_esperado_y"]).sum()
     results_data = {
         "metodo": ["baseline"],
         "modelo_embedding": [model],
@@ -197,6 +204,9 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     #     INDEXAÇÃO (SVS / Vamana)
     # ================================
+    import svs
+    from linktransformer.main_svs import VamanaIndexer
+
     class_svs = VamanaIndexer()
 
     # Aqui vamos seguir a mesma lógica da FAISS:
@@ -204,23 +214,36 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     #   - df1 gera as queries
     # Logo, indexamos embeddings2 (df2) e consultamos com embeddings1 (df1)
     start_index_time = time.time()
-    process = psutil.Process(os.getpid())
-    mem_before = process.memory_info().rss / (1024 ** 2)  # MB
-    
+    tracemalloc.start()
+
+    distance_l2 = getattr(getattr(svs, "DistanceType", None), "L2", None)
+    if distance_l2 is None:
+        distance_l2 = getattr(getattr(svs, "Distance", None), "L2", None)
+    if distance_l2 is None:
+        distance_l2 = "L2"
+
+    primary_kind = getattr(getattr(svs, "LeanVecKind", None), "lvq4", None)
+    if primary_kind is None:
+        primary_kind = "lvq4"
+
+    secondary_kind = getattr(getattr(svs, "LeanVecKind", None), "lvq8", None)
+    if secondary_kind is None:
+        secondary_kind = "lvq8"
+
     index = class_svs.build(
         base_embeddings=embeddings1,        # base indexada (df2)
         reduced_dims=128,                   # projeção para 128D
         graph_max_degree=64,                # M (grau máximo do grafo)
         window_size=128,                    # janela para construção
-        distance=svs.DistanceType.L2,       # métrica L2
+        distance=distance_l2,               # métrica L2 (compatível entre versões)
         num_threads=4,                      # paralelismo
-        primary_kind=svs.LeanVecKind.lvq4,
-        secondary_kind=svs.LeanVecKind.lvq8,
+        primary_kind=primary_kind,
+        secondary_kind=secondary_kind,
     )
 
-    
-    mem_after = process.memory_info().rss / (1024 ** 2)  # MB
-    mem_used_create_index = mem_after - mem_before
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    mem_used_create_index = peak / (1024 ** 2)  # MB
     print(f"Memória utilizada na indexação (SVS): {mem_used_create_index:.2f} MB")
     index_time = time.time() - start_index_time
     print(f"Tempo de indexação (SVS): {index_time:.4f} segundos")
@@ -244,11 +267,11 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     print("Searching SVS index")
     for i in range(num_execucoes):
         start_search_time = time.time()
-        # consultas: embeddings1 (df1) procurando em embeddings2 (df2)
-        mem_before = process.memory_info().rss / (1024 ** 2)  # MB
+        tracemalloc.start()
         I, D = index.search(embeddings2, k)
-        mem_after = process.memory_info().rss / (1024 ** 2)  # MB
-        mem_used_search = mem_after - mem_before
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        mem_used_search = peak / (1024 ** 2)  # MB
         soma_qtde_mem += mem_used_search
         search_time = time.time() - start_search_time
         soma_tempo_busca += search_time
@@ -317,7 +340,7 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-    matches = (df_lm_matched["id_x"] == df_lm_matched["id_y"]).sum()
+    matches = (df_lm_matched["setor_esperado_x"] == df_lm_matched["setor_esperado_y"]).sum()
     results_data = {
         "metodo": ["svs"],
         "modelo_embedding": [model],
@@ -350,6 +373,12 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     - Faz merge fuzzy df1 x df2
     - Salva tempos em resultados.csv com metodo = "hnsw_julia"
     """
+    try:
+        from julia import Main
+    except ImportError:
+        print("AVISO: julia não está instalada ou não está configurada. Pulando merge_knn_hnsw_julia.")
+        return None
+
     # ================================
     #     CARREGAR EMBEDDINGS
     # ================================
@@ -372,13 +401,13 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
 
     # Indexar a BASE = df2 / embeddings2, igual ao padrão FAISS/SVS/NMSLIB
     start_index_time = time.time()
-    process = psutil.Process(os.getpid())
-    mem_before = process.memory_info().rss / (1024 ** 2)  # MB
-    
+    tracemalloc.start()
+
     hnsw = Main.build_hnsw(embeddings1)
-    
-    mem_after = process.memory_info().rss / (1024 ** 2)  # MB
-    mem_used_create_index = mem_after - mem_before
+
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    mem_used_create_index = peak / (1024 ** 2)  # MB
     print(f"Memória utilizada na indexação (HNSW Julia): {mem_used_create_index:.2f} MB")
     index_time = time.time() - start_index_time
     print(f"Tempo de criação do índice (HNSW Julia): {index_time:.4f} segundos")
@@ -400,11 +429,11 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
 
     for i in range(num_execucoes):
         start_search_time = time.time()
-        # search_hnsw(hnsw, queries, k)  -> (I, D, tempo_busca)
-        mem_before = process.memory_info().rss / (1024 ** 2)  # MB
+        tracemalloc.start()
         I, D, tempo_busca = Main.search_hnsw(hnsw, embeddings2)
-        mem_after = process.memory_info().rss / (1024 ** 2)  # MB
-        mem_used_search = mem_after - mem_before
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        mem_used_search = peak / (1024 ** 2)  # MB
         soma_memoria_usada += mem_used_search
         search_time = time.time() - start_search_time
         soma_tempo_busca += tempo_busca  # ou search_time, se preferir consistência
@@ -473,7 +502,7 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-    matches = (df_lm_matched["id_x"] == df_lm_matched["id_y"]).sum()
+    matches = (df_lm_matched["setor_esperado_x"] == df_lm_matched["setor_esperado_y"]).sum()
     results_data = {
         "metodo": ["hnsw_julia"],
         "modelo_embedding": [model],
@@ -506,6 +535,9 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     - Faz merge fuzzy df1 x df2
     - Salva tempos em resultados.csv com metodo = "nmslib_hnsw"
     """
+    if nmslib is None:
+        print("AVISO: nmslib não está instalado. Pulando merge_knn_nmslib.")
+        return None
 
     # ================================
     #     CARREGAR EMBEDDINGS
@@ -525,10 +557,8 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     #     INDEXAÇÃO (NMSLIB / HNSW)
     # ================================
     start_index_time = time.time()
+    tracemalloc.start()
 
-    process = psutil.Process(os.getpid())
-    mem_before = process.memory_info().rss / (1024 ** 2)  # MB
-    
     index = nmslib.init(
         space="cosinesimil",
         method="hnsw"
@@ -542,9 +572,10 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
         },
         print_progress=False,
     )
-    
-    mem_after = process.memory_info().rss / (1024 ** 2)  # MB
-    mem_used_create_index = mem_after - mem_before
+
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    mem_used_create_index = peak / (1024 ** 2)  # MB
     print(f"Memória utilizada na indexação (NMSLIB): {mem_used_create_index:.2f} MB")
 
     index_time = time.time() - start_index_time
@@ -569,10 +600,11 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
 
     for i in range(num_execucoes):
         start_search_time = time.time()
-        mem_before = process.memory_info().rss / (1024 ** 2)  # MB
+        tracemalloc.start()
         res = index.knnQueryBatch(embeddings2, k=k)  # queries = df1
-        mem_after = process.memory_info().rss / (1024 ** 2)  # MB
-        mem_used_search = mem_after - mem_before
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        mem_used_search = peak / (1024 ** 2)  # MB
         soma_qtde_mem += mem_used_search
         search_time = time.time() - start_search_time
         soma_tempo_busca += search_time
@@ -647,7 +679,7 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-    matches = (df_lm_matched["id_x"] == df_lm_matched["id_y"]).sum()
+    matches = (df_lm_matched["setor_esperado_x"] == df_lm_matched["setor_esperado_y"]).sum()
     results_data = {
         "metodo": ["NMSLIB"],
         "modelo_embedding": [model],
@@ -681,7 +713,9 @@ def merge_knn_scann(k, df1, df2, suffixes) -> DataFrame:
     - Faz merge fuzzy df1 x df2
     - Salva tempos em resultados.csv com metodo = "scann_knn"
     """
-    import scann
+    if scann is None:
+        print("AVISO: scann não está instalado. Pulando merge_knn_scann.")
+        return None
 
     # ================================
     #     CARREGAR EMBEDDINGS

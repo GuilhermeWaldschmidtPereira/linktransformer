@@ -1,7 +1,7 @@
 import os
 import time
 import warnings
-from typing import List, Optional, Dict, Tuple, Union
+from typing import Any, List, Optional, Dict, Tuple, Union
 from linktransformer.modelling.LinkTransformer import LinkTransformer
 import numpy as np
 import pandas as pd
@@ -190,7 +190,7 @@ def tokenize_data_for_inference(corpus: str, name: str, hf_model: str):
 
 
 def get_completion_from_messages(
-        client: openai.OpenAI, 
+        client: Any,
         text: str,
         model: str,
         openai_key: str,

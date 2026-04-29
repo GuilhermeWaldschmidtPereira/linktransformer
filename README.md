@@ -213,6 +213,43 @@ no projeto.
 
 ------------------------------------------------------------------------
 
+# Execução com Docker
+
+Também é possível rodar em Docker apenas a parte equivalente ao `venv`
+do `main.sh`, sem executar o trecho de `venv_scann`.
+
+## Build da imagem
+
+``` bash
+docker build -t linktransformer-main .
+```
+
+## Execução
+
+Para usar os arquivos locais do projeto (`data`, `resultados`, `resultados.csv`)
+e persistir as saídas no host:
+
+``` bash
+docker run --rm -it -v "$(pwd):/app" -w /app linktransformer-main
+```
+
+Esse comando executa apenas o fluxo principal dentro do container,
+usando a pasta atual do projeto montada em `/app`.
+
+Hoje a imagem roda o script:
+
+``` bash
+./docker-main.sh
+```
+
+que, por sua vez, executa:
+
+``` bash
+python run_linktransformer/main2.py
+```
+
+------------------------------------------------------------------------
+
 # Saída dos Experimentos
 
 Os resultados gerados pelo pipeline incluem métricas como:
