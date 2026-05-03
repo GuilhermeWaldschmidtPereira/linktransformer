@@ -46,8 +46,8 @@ def main():
     # 2) Ler os CSV de endereços
     # ==========================================
     data_dir = os.path.join(THIS_DIR, "../data")
-    base_path = os.path.join(data_dir, "cnefe_layout_setor_esperado.csv")
-    query_path = os.path.join(data_dir, "cnefe_layout_setor_esperado.csv")
+    base_path = os.path.join(data_dir, "base.csv")
+    query_path = os.path.join(data_dir, "query.csv")
 
     if not os.path.exists(base_path):
         raise FileNotFoundError(f"Não encontrei {base_path}")
