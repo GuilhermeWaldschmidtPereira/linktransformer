@@ -2,7 +2,7 @@
 import argparse
 import json
 import os
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import openai
@@ -19,6 +19,7 @@ DEFAULT_MODELS = [
 ]
 
 ColumnSpec = Union[str, List[str]]
+EmbeddingMode = str
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,10 +32,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default=os.path.join(repo_root, "data"))
     parser.add_argument("--model", dest="models", action="append")
     parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument(
+        "--mode",
+        choices=["both", "base", "query"],
+        default="both",
+        help="Controla se gera embeddings da base, da query, ou de ambos.",
+    )
     parser.add_argument("--on", nargs="+")
     parser.add_argument("--left-on", nargs="+")
     parser.add_argument("--right-on", nargs="+")
     parser.add_argument("--openai-key", default=os.getenv("OPENAI_API_KEY"))
+    parser.add_argument(
+        "--csv-encoding",
+        default=None,
+        help="Encoding do CSV. Se omitido, tenta utf-8, utf-8-sig, latin1 e cp1252.",
+    )
     parser.add_argument("--manifest-path", default=None)
     return parser.parse_args()
 
@@ -46,17 +58,49 @@ def safe_model_name(model_name: str) -> str:
     return sanitized
 
 
-def load_dataframe(path: str) -> pd.DataFrame:
+def load_csv_with_fallback(path: str, encoding: Optional[str] = None) -> pd.DataFrame:
+    if encoding:
+        print(f"Lendo CSV com encoding explícito: {encoding}")
+        return pd.read_csv(path, encoding=encoding)
+
+    candidate_encodings = ["utf-8", "utf-8-sig", "latin1", "cp1252"]
+    last_error: Optional[UnicodeDecodeError] = None
+
+    for candidate in candidate_encodings:
+        try:
+            print(f"Tentando ler CSV com encoding: {candidate}")
+            return pd.read_csv(path, encoding=candidate)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+
+    raise UnicodeDecodeError(
+        last_error.encoding if last_error else "utf-8",
+        last_error.object if last_error else b"",
+        last_error.start if last_error else 0,
+        last_error.end if last_error else 1,
+        (
+            f"Nao foi possivel ler {path} com os encodings testados: "
+            f"{', '.join(candidate_encodings)}. Use --csv-encoding para informar um encoding valido."
+        ),
+    )
+
+
+def load_dataframe(path: str, csv_encoding: Optional[str] = None) -> pd.DataFrame:
     suffix = os.path.splitext(path)[1].lower()
 
     if suffix == ".csv":
-        return pd.read_csv(path)
+        return load_csv_with_fallback(path, encoding=csv_encoding)
     if suffix in {".parquet", ".pq"}:
         return pd.read_parquet(path)
 
     raise ValueError(
         f"Formato de arquivo não suportado para {path}. Use .csv, .parquet ou .pq."
     )
+
+
+def require_input_path(path: str, label: str) -> None:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Não encontrei {label}: {path}")
 
 
 def ordered_common_columns(df_base: pd.DataFrame, df_query: pd.DataFrame) -> List[str]:
@@ -97,6 +141,22 @@ def resolve_columns(
         raise ValueError("Não foi possível resolver as colunas de entrada para embeddings.")
 
     return left_on, right_on
+
+
+def resolve_single_side_columns(
+    side_columns: Optional[List[str]],
+    fallback_columns: Optional[ColumnSpec],
+    label: str,
+) -> ColumnSpec:
+    resolved_columns = normalize_column_spec(side_columns)
+    if resolved_columns is not None:
+        return resolved_columns
+    if fallback_columns is not None:
+        return fallback_columns
+    raise ValueError(
+        f"Não foi possível resolver as colunas de entrada para {label}. "
+        f"Use --on ou informe --{label}-on."
+    )
 
 
 def resolve_sep_token(model_name: str) -> str:
@@ -165,6 +225,28 @@ def ensure_2d_normalized(embeddings: np.ndarray) -> np.ndarray:
     return embeddings / norms
 
 
+def build_embeddings(
+    df: pd.DataFrame,
+    columns: ColumnSpec,
+    model_name: str,
+    batch_size: int,
+    openai_key: Optional[str],
+    label: str,
+) -> np.ndarray:
+    strings = serialize_embedding_input(df, columns, model_name)
+
+    if openai_key:
+        print(f"Inferindo embeddings com OpenAI para {label}...")
+        embeddings = infer_openai_embeddings(strings, model_name, openai_key)
+    else:
+        print(f"Inferindo embeddings com SentenceTransformer para {label}...")
+        embeddings = infer_sentence_transformer_embeddings(strings, model_name, batch_size)
+
+    embeddings = ensure_2d_normalized(embeddings)
+    print(f"embeddings_{label} shape: {embeddings.shape}")
+    return embeddings
+
+
 def build_embedding_pair(
     df_left: pd.DataFrame,
     df_right: pd.DataFrame,
@@ -217,45 +299,106 @@ def build_manifest_entry(model_name: str, left_path: str, right_path: str) -> di
     }
 
 
+def build_single_manifest_entry(model_name: str, output_path: str, mode: EmbeddingMode) -> dict:
+    manifest = {
+        "model": model_name,
+        "safe_model_name": safe_model_name(model_name),
+        "mode": mode,
+    }
+    if mode == "base":
+        manifest["base_embeddings_path"] = output_path
+    elif mode == "query":
+        manifest["query_embeddings_path"] = output_path
+    return manifest
+
+
+def build_output_paths(output_dir: str, model_name: str) -> Tuple[str, str]:
+    safe_name = safe_model_name(model_name)
+    return (
+        os.path.join(output_dir, f"embeddings_base_{safe_name}.npy"),
+        os.path.join(output_dir, f"embeddings_query_{safe_name}.npy"),
+    )
+
+
 def main() -> None:
     args = parse_args()
     models = args.models or DEFAULT_MODELS
 
-    if not os.path.exists(args.base_path):
-        raise FileNotFoundError(f"Não encontrei {args.base_path}")
-    if not os.path.exists(args.query_path):
-        raise FileNotFoundError(f"Não encontrei {args.query_path}")
-
-    df_base = load_dataframe(args.base_path)
-    df_query = load_dataframe(args.query_path)
-    left_on, right_on = resolve_columns(args, df_base, df_query)
-
     os.makedirs(args.output_dir, exist_ok=True)
     manifest = []
 
-    for model_name in models:
-        safe_name = safe_model_name(model_name)
-        base_output_path = os.path.join(args.output_dir, f"embeddings_base_{safe_name}.npy")
-        query_output_path = os.path.join(args.output_dir, f"embeddings_query_{safe_name}.npy")
+    if args.mode == "both":
+        require_input_path(args.base_path, "base")
+        require_input_path(args.query_path, "query")
+        df_base = load_dataframe(args.base_path, csv_encoding=args.csv_encoding)
+        df_query = load_dataframe(args.query_path, csv_encoding=args.csv_encoding)
+        left_on, right_on = resolve_columns(args, df_base, df_query)
 
-        print(f"Gerando embeddings com o modelo: {model_name}")
-        embeddings_left, embeddings_right = build_embedding_pair(
-            df_left=df_base,
-            df_right=df_query,
-            left_on=left_on,
-            right_on=right_on,
-            model_name=model_name,
-            batch_size=args.batch_size,
-            openai_key=args.openai_key,
-        )
-        save_embeddings(
-            embeddings_left=embeddings_left,
-            embeddings_right=embeddings_right,
-            left_output_path=base_output_path,
-            right_output_path=query_output_path,
-        )
-        print(f"Embeddings salvos em: {base_output_path} e {query_output_path}")
-        manifest.append(build_manifest_entry(model_name, base_output_path, query_output_path))
+        for model_name in models:
+            base_output_path, query_output_path = build_output_paths(args.output_dir, model_name)
+
+            print(f"Gerando embeddings com o modelo: {model_name}")
+            embeddings_left, embeddings_right = build_embedding_pair(
+                df_left=df_base,
+                df_right=df_query,
+                left_on=left_on,
+                right_on=right_on,
+                model_name=model_name,
+                batch_size=args.batch_size,
+                openai_key=args.openai_key,
+            )
+            save_embeddings(
+                embeddings_left=embeddings_left,
+                embeddings_right=embeddings_right,
+                left_output_path=base_output_path,
+                right_output_path=query_output_path,
+            )
+            print(f"Embeddings salvos em: {base_output_path} e {query_output_path}")
+            manifest.append(build_manifest_entry(model_name, base_output_path, query_output_path))
+
+    elif args.mode == "base":
+        require_input_path(args.base_path, "base")
+        df_base = load_dataframe(args.base_path, csv_encoding=args.csv_encoding)
+        base_columns = resolve_single_side_columns(args.left_on, normalize_column_spec(args.on), "left")
+
+        for model_name in models:
+            base_output_path, _ = build_output_paths(args.output_dir, model_name)
+
+            print(f"Gerando embeddings da base com o modelo: {model_name}")
+            embeddings_base = build_embeddings(
+                df=df_base,
+                columns=base_columns,
+                model_name=model_name,
+                batch_size=args.batch_size,
+                openai_key=args.openai_key,
+                label="base",
+            )
+            os.makedirs(os.path.dirname(base_output_path), exist_ok=True)
+            np.save(base_output_path, embeddings_base.astype(np.float32))
+            print(f"Embeddings salvos em: {base_output_path}")
+            manifest.append(build_single_manifest_entry(model_name, base_output_path, "base"))
+
+    elif args.mode == "query":
+        require_input_path(args.query_path, "query")
+        df_query = load_dataframe(args.query_path, csv_encoding=args.csv_encoding)
+        query_columns = resolve_single_side_columns(args.right_on, normalize_column_spec(args.on), "right")
+
+        for model_name in models:
+            _, query_output_path = build_output_paths(args.output_dir, model_name)
+
+            print(f"Gerando embeddings da query com o modelo: {model_name}")
+            embeddings_query = build_embeddings(
+                df=df_query,
+                columns=query_columns,
+                model_name=model_name,
+                batch_size=args.batch_size,
+                openai_key=args.openai_key,
+                label="query",
+            )
+            os.makedirs(os.path.dirname(query_output_path), exist_ok=True)
+            np.save(query_output_path, embeddings_query.astype(np.float32))
+            print(f"Embeddings salvos em: {query_output_path}")
+            manifest.append(build_single_manifest_entry(model_name, query_output_path, "query"))
 
     if args.manifest_path:
         manifest_dir = os.path.dirname(args.manifest_path)
