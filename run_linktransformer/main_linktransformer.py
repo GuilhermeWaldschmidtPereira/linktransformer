@@ -70,7 +70,20 @@ def load_input_data():
         if not os.path.exists(query_path):
             raise FileNotFoundError(f"Não encontrei {query_path}")
 
-    return pd.read_csv(base_path), pd.read_csv(query_path)
+    # Tentar ler com diferentes separadores
+    def read_csv_with_fallback(path):
+        for sep in [',', ';']:
+            try:
+                print(f">>> Tentando ler {path} com sep='{sep}'...")
+                df = pd.read_csv(path, sep=sep)
+                print(f"    Sucesso! Arquivo lido com sep='{sep}'")
+                return df
+            except Exception as e:
+                print(f"    Falha com sep='{sep}': {str(e)[:100]}")
+                continue
+        raise ValueError(f"Não consegui ler {path} com nenhum separador testado (,;)")
+    
+    return read_csv_with_fallback(base_path), read_csv_with_fallback(query_path)
 
 
 def prepare_dataframes(df_base: pd.DataFrame, df_query: pd.DataFrame):
