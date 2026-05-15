@@ -14,7 +14,7 @@ SPEC.loader.exec_module(RUN_EMBEDDINGS)
 
 
 def test_load_dataframe_supports_utf8_csv(tmp_path):
-    path = tmp_path / "input.csv"
+    path = tmp_path / "query.csv"
     expected = pd.DataFrame({"name": ["Joao", "Maria"], "value": [1, 2]})
     expected.to_csv(path, index=False, encoding="utf-8")
 
@@ -24,7 +24,7 @@ def test_load_dataframe_supports_utf8_csv(tmp_path):
 
 
 def test_load_dataframe_supports_cp1252_csv_with_fallback(tmp_path):
-    path = tmp_path / "input.csv"
+    path = tmp_path / "query.csv"
     expected = pd.DataFrame({"name": ["José", "Maçã"], "value": [1, 2]})
     expected.to_csv(path, index=False, encoding="cp1252")
 
@@ -37,6 +37,16 @@ def test_load_dataframe_supports_parquet(tmp_path):
     path = tmp_path / "input.parquet"
     expected = pd.DataFrame({"name": ["a", "b"], "value": [1, 2]})
     expected.to_parquet(path, index=False)
+
+    loaded = RUN_EMBEDDINGS.load_dataframe(str(path))
+
+    assert loaded.equals(expected)
+
+
+def test_load_dataframe_uses_semicolon_for_base_csv(tmp_path):
+    path = tmp_path / "base.csv"
+    expected = pd.DataFrame({"name": ["Joao", "Maria"], "value": [1, 2]})
+    expected.to_csv(path, index=False, encoding="utf-8", sep=";")
 
     loaded = RUN_EMBEDDINGS.load_dataframe(str(path))
 

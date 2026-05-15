@@ -60,10 +60,20 @@ def safe_model_name(model_name: str) -> str:
     return sanitized
 
 
-def load_csv_with_fallback(path: str, encoding: Optional[str] = None) -> pd.DataFrame:
+def resolve_csv_separator(path: str) -> str:
+    if os.path.basename(path).lower() == "base.csv":
+        return ";"
+    return ","
+
+
+def load_csv_with_fallback(
+    path: str,
+    encoding: Optional[str] = None,
+) -> pd.DataFrame:
+    sep = resolve_csv_separator(path)
     if encoding:
         print(f"Lendo CSV com encoding explícito: {encoding}")
-        return pd.read_csv(path, encoding=encoding)
+        return pd.read_csv(path, encoding=encoding, sep=sep)
 
     candidate_encodings = ["utf-8", "utf-8-sig", "latin1", "cp1252"]
     last_error: Optional[UnicodeDecodeError] = None
@@ -71,10 +81,9 @@ def load_csv_with_fallback(path: str, encoding: Optional[str] = None) -> pd.Data
     for candidate in candidate_encodings:
         try:
             print(f"Tentando ler CSV com encoding: {candidate}")
-            return pd.read_csv(path, encoding=candidate)
+            return pd.read_csv(path, encoding=candidate, sep=sep)
         except UnicodeDecodeError as exc:
             last_error = exc
-
     raise UnicodeDecodeError(
         last_error.encoding if last_error else "utf-8",
         last_error.object if last_error else b"",
@@ -87,7 +96,10 @@ def load_csv_with_fallback(path: str, encoding: Optional[str] = None) -> pd.Data
     )
 
 
-def load_dataframe(path: str, csv_encoding: Optional[str] = None) -> pd.DataFrame:
+def load_dataframe(
+    path: str,
+    csv_encoding: Optional[str] = None,
+) -> pd.DataFrame:
     suffix = os.path.splitext(path)[1].lower()
 
     if suffix == ".csv":
