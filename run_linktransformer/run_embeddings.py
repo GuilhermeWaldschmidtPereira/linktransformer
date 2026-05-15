@@ -2,11 +2,13 @@
 import argparse
 import json
 import os
+import time
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import openai
 import pandas as pd
+import psutil
 import transformers
 from sentence_transformers import SentenceTransformer
 
@@ -225,6 +227,15 @@ def ensure_2d_normalized(embeddings: np.ndarray) -> np.ndarray:
     return embeddings / norms
 
 
+def elapsed_summary(elapsed_seconds: float) -> str:
+    return f"{elapsed_seconds:.2f}s ({elapsed_seconds / 60.0:.2f} min)"
+
+
+def current_memory_mb() -> float:
+    process = psutil.Process(os.getpid())
+    return process.memory_info().rss / (1024 ** 2)
+
+
 def build_embeddings(
     df: pd.DataFrame,
     columns: ColumnSpec,
@@ -233,6 +244,8 @@ def build_embeddings(
     openai_key: Optional[str],
     label: str,
 ) -> np.ndarray:
+    start_time = time.perf_counter()
+    memory_before_mb = current_memory_mb()
     strings = serialize_embedding_input(df, columns, model_name)
 
     if openai_key:
@@ -244,6 +257,13 @@ def build_embeddings(
 
     embeddings = ensure_2d_normalized(embeddings)
     print(f"embeddings_{label} shape: {embeddings.shape}")
+    elapsed_seconds = time.perf_counter() - start_time
+    memory_after_mb = current_memory_mb()
+    print(f"Tempo para gerar embeddings_{label}: {elapsed_summary(elapsed_seconds)}")
+    print(
+        f"Memória para embeddings_{label}: "
+        f"início {memory_before_mb:.2f} MB | fim {memory_after_mb:.2f} MB | delta {memory_after_mb - memory_before_mb:.2f} MB"
+    )
     return embeddings
 
 
@@ -256,6 +276,8 @@ def build_embedding_pair(
     batch_size: int,
     openai_key: Optional[str],
 ) -> Tuple[np.ndarray, np.ndarray]:
+    start_time = time.perf_counter()
+    memory_before_mb = current_memory_mb()
     strings_left = serialize_embedding_input(df_left, left_on, model_name)
     strings_right = serialize_embedding_input(df_right, right_on, model_name)
 
@@ -275,6 +297,13 @@ def build_embedding_pair(
 
     print(f"embeddings_left shape: {embeddings_left.shape}")
     print(f"embeddings_right shape: {embeddings_right.shape}")
+    elapsed_seconds = time.perf_counter() - start_time
+    memory_after_mb = current_memory_mb()
+    print(f"Tempo para gerar embeddings do par: {elapsed_summary(elapsed_seconds)}")
+    print(
+        f"Memória para embeddings do par: "
+        f"início {memory_before_mb:.2f} MB | fim {memory_after_mb:.2f} MB | delta {memory_after_mb - memory_before_mb:.2f} MB"
+    )
     return embeddings_left, embeddings_right
 
 
@@ -297,6 +326,25 @@ def build_manifest_entry(model_name: str, left_path: str, right_path: str) -> di
         "base_embeddings_path": left_path,
         "query_embeddings_path": right_path,
     }
+
+
+def add_timing_to_manifest(manifest_entry: dict, elapsed_seconds: float) -> dict:
+    manifest_entry["elapsed_seconds"] = elapsed_seconds
+    manifest_entry["elapsed_minutes"] = elapsed_seconds / 60.0
+    return manifest_entry
+
+
+def add_memory_to_manifest(
+    manifest_entry: dict,
+    memory_start_mb: float,
+    memory_end_mb: float,
+    memory_peak_mb: float,
+) -> dict:
+    manifest_entry["memory_start_mb"] = memory_start_mb
+    manifest_entry["memory_end_mb"] = memory_end_mb
+    manifest_entry["memory_peak_mb"] = memory_peak_mb
+    manifest_entry["memory_delta_mb"] = memory_end_mb - memory_start_mb
+    return manifest_entry
 
 
 def build_single_manifest_entry(model_name: str, output_path: str, mode: EmbeddingMode) -> dict:
@@ -335,6 +383,8 @@ def main() -> None:
         left_on, right_on = resolve_columns(args, df_base, df_query)
 
         for model_name in models:
+            model_start_time = time.perf_counter()
+            model_memory_start_mb = current_memory_mb()
             base_output_path, query_output_path = build_output_paths(args.output_dir, model_name)
 
             print(f"Gerando embeddings com o modelo: {model_name}")
@@ -354,7 +404,26 @@ def main() -> None:
                 right_output_path=query_output_path,
             )
             print(f"Embeddings salvos em: {base_output_path} e {query_output_path}")
-            manifest.append(build_manifest_entry(model_name, base_output_path, query_output_path))
+            elapsed_seconds = time.perf_counter() - model_start_time
+            model_memory_end_mb = current_memory_mb()
+            model_memory_peak_mb = max(model_memory_start_mb, model_memory_end_mb)
+            print(f"Tempo total do modelo {model_name}: {elapsed_summary(elapsed_seconds)}")
+            print(
+                f"Memória total do modelo {model_name}: "
+                f"início {model_memory_start_mb:.2f} MB | fim {model_memory_end_mb:.2f} MB | "
+                f"peak aprox. {model_memory_peak_mb:.2f} MB | delta {model_memory_end_mb - model_memory_start_mb:.2f} MB"
+            )
+            manifest.append(
+                add_memory_to_manifest(
+                    add_timing_to_manifest(
+                        build_manifest_entry(model_name, base_output_path, query_output_path),
+                        elapsed_seconds,
+                    ),
+                    model_memory_start_mb,
+                    model_memory_end_mb,
+                    model_memory_peak_mb,
+                )
+            )
 
     elif args.mode == "base":
         require_input_path(args.base_path, "base")
@@ -362,6 +431,8 @@ def main() -> None:
         base_columns = resolve_single_side_columns(args.left_on, normalize_column_spec(args.on), "left")
 
         for model_name in models:
+            model_start_time = time.perf_counter()
+            model_memory_start_mb = current_memory_mb()
             base_output_path, _ = build_output_paths(args.output_dir, model_name)
 
             print(f"Gerando embeddings da base com o modelo: {model_name}")
@@ -376,7 +447,26 @@ def main() -> None:
             os.makedirs(os.path.dirname(base_output_path), exist_ok=True)
             np.save(base_output_path, embeddings_base.astype(np.float32))
             print(f"Embeddings salvos em: {base_output_path}")
-            manifest.append(build_single_manifest_entry(model_name, base_output_path, "base"))
+            elapsed_seconds = time.perf_counter() - model_start_time
+            model_memory_end_mb = current_memory_mb()
+            model_memory_peak_mb = max(model_memory_start_mb, model_memory_end_mb)
+            print(f"Tempo total do modelo {model_name}: {elapsed_summary(elapsed_seconds)}")
+            print(
+                f"Memória total do modelo {model_name}: "
+                f"início {model_memory_start_mb:.2f} MB | fim {model_memory_end_mb:.2f} MB | "
+                f"peak aprox. {model_memory_peak_mb:.2f} MB | delta {model_memory_end_mb - model_memory_start_mb:.2f} MB"
+            )
+            manifest.append(
+                add_memory_to_manifest(
+                    add_timing_to_manifest(
+                        build_single_manifest_entry(model_name, base_output_path, "base"),
+                        elapsed_seconds,
+                    ),
+                    model_memory_start_mb,
+                    model_memory_end_mb,
+                    model_memory_peak_mb,
+                )
+            )
 
     elif args.mode == "query":
         require_input_path(args.query_path, "query")
@@ -384,6 +474,8 @@ def main() -> None:
         query_columns = resolve_single_side_columns(args.right_on, normalize_column_spec(args.on), "right")
 
         for model_name in models:
+            model_start_time = time.perf_counter()
+            model_memory_start_mb = current_memory_mb()
             _, query_output_path = build_output_paths(args.output_dir, model_name)
 
             print(f"Gerando embeddings da query com o modelo: {model_name}")
@@ -398,7 +490,26 @@ def main() -> None:
             os.makedirs(os.path.dirname(query_output_path), exist_ok=True)
             np.save(query_output_path, embeddings_query.astype(np.float32))
             print(f"Embeddings salvos em: {query_output_path}")
-            manifest.append(build_single_manifest_entry(model_name, query_output_path, "query"))
+            elapsed_seconds = time.perf_counter() - model_start_time
+            model_memory_end_mb = current_memory_mb()
+            model_memory_peak_mb = max(model_memory_start_mb, model_memory_end_mb)
+            print(f"Tempo total do modelo {model_name}: {elapsed_summary(elapsed_seconds)}")
+            print(
+                f"Memória total do modelo {model_name}: "
+                f"início {model_memory_start_mb:.2f} MB | fim {model_memory_end_mb:.2f} MB | "
+                f"peak aprox. {model_memory_peak_mb:.2f} MB | delta {model_memory_end_mb - model_memory_start_mb:.2f} MB"
+            )
+            manifest.append(
+                add_memory_to_manifest(
+                    add_timing_to_manifest(
+                        build_single_manifest_entry(model_name, query_output_path, "query"),
+                        elapsed_seconds,
+                    ),
+                    model_memory_start_mb,
+                    model_memory_end_mb,
+                    model_memory_peak_mb,
+                )
+            )
 
     if args.manifest_path:
         manifest_dir = os.path.dirname(args.manifest_path)

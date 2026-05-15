@@ -64,3 +64,17 @@ def test_build_output_paths_generates_base_and_query_names(tmp_path):
     base_path, query_path = RUN_EMBEDDINGS.build_output_paths(str(tmp_path), "sentence-transformers/all-MiniLM-L6-v2")
     assert base_path.endswith("embeddings_base_sentence-transformers_all-MiniLM-L6-v2.npy")
     assert query_path.endswith("embeddings_query_sentence-transformers_all-MiniLM-L6-v2.npy")
+
+
+def test_add_timing_to_manifest_adds_seconds_and_minutes():
+    manifest = RUN_EMBEDDINGS.add_timing_to_manifest({"model": "m1"}, 120.0)
+    assert manifest["elapsed_seconds"] == 120.0
+    assert manifest["elapsed_minutes"] == 2.0
+
+
+def test_add_memory_to_manifest_adds_memory_fields():
+    manifest = RUN_EMBEDDINGS.add_memory_to_manifest({"model": "m1"}, 100.0, 130.0, 145.0)
+    assert manifest["memory_start_mb"] == 100.0
+    assert manifest["memory_end_mb"] == 130.0
+    assert manifest["memory_peak_mb"] == 145.0
+    assert manifest["memory_delta_mb"] == 30.0
