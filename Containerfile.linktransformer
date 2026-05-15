@@ -25,7 +25,10 @@ COPY requirements_podman_linktransformer.txt /tmp/requirements_podman_linktransf
 RUN python -m pip install --upgrade pip setuptools wheel \
     && python -m pip install --no-cache-dir -r /tmp/requirements_podman_linktransformer.txt
 
-RUN CXXFLAGS="-include cstdint" python -m pip install --no-cache-dir --no-build-isolation nmslib==2.1.1
+RUN python -m pip install --no-cache-dir nmslib==2.1.2
+
+RUN python -m pip uninstall -y svs \
+    && python -m pip install --no-cache-dir scalable-vs
 
 RUN curl -fsSL "https://julialang-s3.julialang.org/bin/linux/x64/1.10/julia-${JULIA_VERSION}-linux-x86_64.tar.gz" \
     | tar -xz -C /opt \

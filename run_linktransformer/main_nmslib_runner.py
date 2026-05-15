@@ -12,13 +12,16 @@ if THIS_DIR not in sys.path:
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
+# Importa nmslib antes dos outros módulos C++/pybind do projeto.
+import nmslib  # noqa: F401, E402
+
 from main_linktransformer import (  # noqa: E402
     MODELOS_A_UTILIZAR,
     assert_embeddings_exist,
     load_input_data,
     prepare_dataframes,
 )
-from linktransformer.infer_main import merge_knn_hnsw_julia  # noqa: E402
+from linktransformer.infer_main import merge_knn_nmslib  # noqa: E402
 
 
 def main() -> None:
@@ -31,8 +34,8 @@ def main() -> None:
         df1, df2 = prepare_dataframes(df_base, df_query)
 
         for k in ks:
-            print(f">>> Rodando HNSW Julia | modelo={modelo} | k={k}")
-            merge_knn_hnsw_julia(k, df1, df2, suffixes, modelo)
+            print(f">>> Rodando NMSLIB | modelo={modelo} | k={k}")
+            merge_knn_nmslib(k, df1, df2, suffixes, modelo)
 
 
 if __name__ == "__main__":

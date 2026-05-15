@@ -18,7 +18,6 @@ if SRC_DIR not in sys.path:
 from linktransformer.infer_main import (  # noqa: E402
     merge_knn,
     merge_knn2,
-    merge_knn_nmslib,
 )
 
 
@@ -103,7 +102,6 @@ def main() -> None:
             print(f">>> Rodando LinkTransformer sem ScaNN | modelo={modelo} | k={k}")
             merge_knn(k, df1, df2, suffixes, modelo)
             merge_knn2(k, df1, df2, suffixes, modelo)
-            merge_knn_nmslib(k, df1, df2, suffixes, modelo)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,13 @@ import numpy as np
 import svs
 
 
+def _svs_value(enum_name: str, value_name: str, fallback):
+    enum = getattr(svs, enum_name, None)
+    if enum is None:
+        return fallback
+    return getattr(enum, value_name, fallback)
+
+
 class VamanaIndexer:
     """
     Constrói um índice Vamana (SVS) a partir de embeddings em memória (np.ndarray).
@@ -53,10 +60,10 @@ class VamanaIndexer:
         reduced_dims: int = 128,
         graph_max_degree: int = 64,
         window_size: int = 128,
-        distance: 'l2',
+        distance="L2",
         num_threads: int = 4,
-        primary_kind: 'lvq4',
-        secondary_kind: 'lvq8',
+        primary_kind="lvq4",
+        secondary_kind="lvq8",
     ) -> None:
         """
         Constrói o índice Vamana a partir dos embeddings da base (N x D).
@@ -69,6 +76,10 @@ class VamanaIndexer:
         base = np.asarray(base_embeddings, dtype=np.float32, order="C")
         if base.ndim != 2:
             raise ValueError(f"base_embeddings deve ter shape (N, D); recebido {base.shape}.")
+
+        distance = _svs_value("DistanceType", str(distance).upper(), distance)
+        primary_kind = _svs_value("LeanVecKind", str(primary_kind).lower(), primary_kind)
+        secondary_kind = _svs_value("LeanVecKind", str(secondary_kind).lower(), secondary_kind)
 
         # 1) Salvar .fvecs para o loader do SVS
         self._save_fvecs(self._data_fvecs, base)
@@ -128,5 +139,5 @@ class VamanaIndexer:
         self.index.num_threads = num_threads
 
         # 3) Buscar
-        I, D = self.index.search(queries_svs, 1)
-        return I
+        I, D = self.index.search(queries_svs, k)
+        return I, D

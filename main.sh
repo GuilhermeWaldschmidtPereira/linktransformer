@@ -38,6 +38,15 @@ podman run --rm \
   "${IMAGE_NAME}" \
   python /workspace/run_linktransformer/main_linktransformer.py
 
+echo ">>> Rodando NMSLIB via Podman..."
+podman run --rm \
+  --userns=keep-id \
+  --user "$(id -u):$(id -g)" \
+  -v "${PROJECT_ROOT}:/workspace:Z" \
+  -w /workspace \
+  "${IMAGE_NAME}" \
+  python /workspace/run_linktransformer/main_nmslib_runner.py
+
 echo ">>> Rodando HNSW Julia via Podman..."
 podman run --rm \
   --userns=keep-id \

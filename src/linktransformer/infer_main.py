@@ -211,10 +211,10 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
         reduced_dims=128,                   # projeção para 128D
         graph_max_degree=64,                # M (grau máximo do grafo)
         window_size=128,                    # janela para construção
-        distance=svs.DistanceType.L2,       # métrica L2
+        distance="L2",                      # métrica L2
         num_threads=4,                      # paralelismo
-        primary_kind=svs.LeanVecKind.lvq4,
-        secondary_kind=svs.LeanVecKind.lvq8,
+        primary_kind="lvq4",
+        secondary_kind="lvq8",
     )
 
     
