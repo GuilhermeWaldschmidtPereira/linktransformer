@@ -9,7 +9,6 @@ import pandas as pd
 import svs
 from typing import Union, List, Optional, Tuple,Dict, Any
 from pandas import DataFrame
-from julia import Julia, Main
 
 import psutil
 import os
@@ -21,7 +20,6 @@ from itertools import combinations
 from transformers import TrainingArguments, Trainer
 from linktransformer.main_svs import VamanaIndexer
 import time
-import nmslib
 
 PATH_RESULTADOS = os.path.join(os.path.dirname(__file__), "resultados")
 
@@ -369,6 +367,8 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     #     INDEXAÇÃO (HNSW em Julia)
     # ================================
     # Importante: ajustar caminho conforme a estrutura do projeto
+    from julia import Main
+
     Main.include("hnsw_julia/hnsw_wrapper.jl")
 
     # Indexar a BASE = df2 / embeddings2, igual ao padrão FAISS/SVS/NMSLIB
@@ -507,6 +507,7 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     - Faz merge fuzzy df1 x df2
     - Salva tempos em resultados.csv com metodo = "nmslib_hnsw"
     """
+    import nmslib
 
     # ================================
     #     CARREGAR EMBEDDINGS

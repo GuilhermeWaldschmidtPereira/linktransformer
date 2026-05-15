@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+import os
+import sys
+from typing import List
+
+import numpy as np
+import pandas as pd
+
+
+THIS_DIR = os.path.dirname(__file__)
+REPO_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
+SRC_DIR = os.path.join(REPO_ROOT, "src")
+DATA_DIR = os.path.join(REPO_ROOT, "data")
+
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
+
+from linktransformer.infer_main import (  # noqa: E402
+    merge_knn,
+    merge_knn2,
+    merge_knn_nmslib,
+)
+
+
+MODELOS_A_UTILIZAR: List[str] = [
+    "sentence-transformers/all-MiniLM-L6-v2",
+    "sentence-transformers/all-mpnet-base-v2",
+    "intfloat/multilingual-e5-large",
+    "neuralmind/bert-large-portuguese-cased",
+]
+
+
+def safe_model_name(modelo: str) -> str:
+    safe_model = str(modelo).replace(os.sep, "_")
+    if os.path.altsep:
+        safe_model = safe_model.replace(os.path.altsep, "_")
+    return safe_model
+
+
+def assert_embeddings_exist(modelo: str) -> None:
+    safe_model = safe_model_name(modelo)
+    paths = [
+        os.path.join(DATA_DIR, f"embeddings_base_{safe_model}.npy"),
+        os.path.join(DATA_DIR, f"embeddings_query_{safe_model}.npy"),
+    ]
+    missing_paths = [path for path in paths if not os.path.exists(path)]
+    if missing_paths:
+        missing = "\n".join(f"- {path}" for path in missing_paths)
+        raise FileNotFoundError(
+            "Embeddings pre-computados não encontrados. "
+            "Execute primeiro o script isolado de embeddings.\n"
+            f"{missing}"
+        )
+
+
+def load_input_data():
+    base_path = os.environ.get("LINKTRANSFORMER_BASE_CSV", os.path.join(DATA_DIR, "base.csv"))
+    query_path = os.environ.get("LINKTRANSFORMER_QUERY_CSV", os.path.join(DATA_DIR, "query.csv"))
+
+    fallback_path = os.path.join(DATA_DIR, "cnefe_layout_setor_esperado.csv")
+    if not os.path.exists(base_path) and not os.path.exists(query_path) and os.path.exists(fallback_path):
+        print(
+            ">>> data/base.csv e data/query.csv não encontrados. "
+            f"Usando {fallback_path} como base e query."
+        )
+        base_path = fallback_path
+        query_path = fallback_path
+    else:
+        if not os.path.exists(base_path):
+            raise FileNotFoundError(f"Não encontrei {base_path}")
+        if not os.path.exists(query_path):
+            raise FileNotFoundError(f"Não encontrei {query_path}")
+
+    return pd.read_csv(base_path), pd.read_csv(query_path)
+
+
+def prepare_dataframes(df_base: pd.DataFrame, df_query: pd.DataFrame):
+    df1 = df_base.copy()
+    df2 = df_query.copy()
+
+    if "id_lt" in df1.columns:
+        raise ValueError("Column id_lt already exists in df_base, renomeie antes de continuar")
+    if "id_lt" in df2.columns:
+        raise ValueError("Column id_lt already exists in df_query, renomeie antes de continuar")
+
+    df1.loc[:, "id_lt"] = np.arange(len(df1))
+    df2.loc[:, "id_lt"] = np.arange(len(df2))
+    return df1, df2
+
+
+def main() -> None:
+    df_base, df_query = load_input_data()
+    suffixes = ("_x", "_y")
+
+    # Mantém o comportamento anterior de main2.py: range(2) com i > 0 executava apenas k=1.
+    ks = [1]
+
+    for modelo in MODELOS_A_UTILIZAR:
+        assert_embeddings_exist(modelo)
+        df1, df2 = prepare_dataframes(df_base, df_query)
+
+        for k in ks:
+            print(f">>> Rodando LinkTransformer sem ScaNN | modelo={modelo} | k={k}")
+            merge_knn(k, df1, df2, suffixes, modelo)
+            merge_knn2(k, df1, df2, suffixes, modelo)
+            merge_knn_nmslib(k, df1, df2, suffixes, modelo)
+
+
+if __name__ == "__main__":
+    main()

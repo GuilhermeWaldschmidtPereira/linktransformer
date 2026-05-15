@@ -3,41 +3,48 @@ set -e  # se qualquer comando falhar, o script para
 
 # Create results file
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+IMAGE_NAME="${LINKTRANSFORMER_IMAGE:-localhost/projeto-mestrado-linktransformer:latest}"
+
+if ! command -v podman >/dev/null 2>&1; then
+  echo "Erro: podman não está instalado ou não está disponível no PATH." >&2
+  exit 1
+fi
 
 # Criar o resultados.csv no mesmo diretório do script
-sudo rm -f "$SCRIPT_DIR/resultados.csv"
-sudo touch "$SCRIPT_DIR/resultados.csv"
-
-sudo chown gpereira:users "$SCRIPT_DIR/resultados.csv"
+rm -f "$SCRIPT_DIR/resultados.csv"
+touch "$SCRIPT_DIR/resultados.csv"
 
 echo "metodo,modelo_embedding,index_time,search_time,total_time,num_rows_df1,num_rows_df2,k,mem_used_indexation_MB,avg_mem_used_search_MB,matches" > "$SCRIPT_DIR/resultados.csv"
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-VENV_SCANN="$HOME/venv_scann"
-
-echo "Venv ScaNN:  ${VENV_SCANN}"
-
-
 ########################################
-# 1) venv geral - 4 algoritmos
+# Podman - LinkTransformer sem ScaNN
 ########################################
-(
+if ! podman image exists "${IMAGE_NAME}"; then
+  echo ">>> Imagem ${IMAGE_NAME} não encontrada. Construindo com Podman..."
+  podman build \
+    --layers \
+    -f "${PROJECT_ROOT}/Containerfile.linktransformer" \
+    -t "${IMAGE_NAME}" \
+    "${PROJECT_ROOT}"
+fi
 
-    # Execute Python script
-    python-jl "${PROJECT_ROOT}/run_linktransformer/main2.py" 
+echo ">>> Rodando LinkTransformer sem ScaNN via Podman..."
+podman run --rm \
+  --userns=keep-id \
+  --user "$(id -u):$(id -g)" \
+  -v "${PROJECT_ROOT}:/workspace:Z" \
+  -w /workspace \
+  "${IMAGE_NAME}" \
+  python /workspace/run_linktransformer/main_linktransformer.py
 
-)
+echo ">>> Rodando HNSW Julia via Podman..."
+podman run --rm \
+  --userns=keep-id \
+  --user "$(id -u):$(id -g)" \
+  -v "${PROJECT_ROOT}:/workspace:Z" \
+  -w /workspace \
+  "${IMAGE_NAME}" \
+  python-jl /workspace/run_linktransformer/main_hnsw_julia.py
 
-########################################
-# 2) venv_scann - algoritmo ScaNN
-########################################
-(
-  echo ">>> Ativando venv_scann..."
-  source "${VENV_SCANN}/bin/activate"
-
-  echo ">>> Rodando ScaNN..."
-  python "${PROJECT_ROOT}/run_linktransformer/main_scann.py"
-)
-
-echo ">>> FIM de todos os experimentos."
+echo ">>> FIM dos experimentos LinkTransformer sem ScaNN."
