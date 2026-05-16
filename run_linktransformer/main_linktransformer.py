@@ -70,19 +70,26 @@ def load_input_data():
         if not os.path.exists(query_path):
             raise FileNotFoundError(f"Não encontrei {query_path}")
 
-    # Tentar ler com diferentes separadores
+    print(f">>> Lendo CSVs\n    base = {base_path}\n    query = {query_path}", flush=True)
+
     def read_csv_with_fallback(path):
-        for sep in [',', ';']:
+        file_size_mb = os.path.getsize(path) / (1024 * 1024)
+        print(f">>> Arquivo {path} ({file_size_mb:.2f} MB)", flush=True)
+
+        for sep in [",", ";"]:
             try:
-                print(f">>> Tentando ler {path} com sep='{sep}'...")
+                print(f">>> Tentando ler {path} com sep='{sep}'...", flush=True)
                 df = pd.read_csv(path, sep=sep)
-                print(f"    Sucesso! Arquivo lido com sep='{sep}'")
+                print(f"    Sucesso! Arquivo lido com sep='{sep}' | linhas={len(df)} | colunas={len(df.columns)}", flush=True)
                 return df
+            except pd.errors.ParserError as e:
+                print(f"    Falha com sep='{sep}': ParserError -> {str(e)[:150]}", flush=True)
             except Exception as e:
-                print(f"    Falha com sep='{sep}': {str(e)[:100]}")
+                print(f"    Falha com sep='{sep}': {type(e).__name__} -> {str(e)[:150]}", flush=True)
                 continue
+
         raise ValueError(f"Não consegui ler {path} com nenhum separador testado (,;)")
-    
+
     return read_csv_with_fallback(base_path), read_csv_with_fallback(query_path)
 
 
