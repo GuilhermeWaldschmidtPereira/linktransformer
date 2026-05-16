@@ -23,6 +23,8 @@ import time
 
 PATH_RESULTADOS = os.path.join(os.path.dirname(__file__), "resultados")
 
+NUM_EXECUCOES_BUSCA = max(1, int(os.environ.get("LT_NUM_EXECUCOES_BUSCA", "5")))
+
 if not os.path.exists(PATH_RESULTADOS):
     os.makedirs(PATH_RESULTADOS)
 
@@ -75,7 +77,7 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     # ================================
     #     BUSCA KNN (FAISS)
     # ================================
-    num_execucoes = 100
+    num_execucoes = NUM_EXECUCOES_BUSCA
     soma_tempo_busca = 0.0
     D = None
     I = None
@@ -240,7 +242,7 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     #     BUSCA KNN (SVS)
     # ================================
-    num_execucoes = 100
+    num_execucoes = NUM_EXECUCOES_BUSCA
     soma_tempo_busca = 0.0
     soma_qtde_mem = 0.0
     I = None
@@ -402,7 +404,7 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     #     BUSCA KNN
     # ================================
     soma_tempo_busca = 0.0
-    num_execucoes = 100
+    num_execucoes = NUM_EXECUCOES_BUSCA
     I = None
     D = None
     soma_memoria_usada = 0.0
@@ -571,7 +573,7 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     #     BUSCA KNN (NMSLIB)
     # ================================
-    num_execucoes = 100
+    num_execucoes = NUM_EXECUCOES_BUSCA
     soma_tempo_busca = 0.0
     neighbors = None
     distances = None
@@ -731,7 +733,7 @@ def merge_knn_scann(k, df1, df2, suffixes) -> DataFrame:
     # ================================
     #     BUSCA KNN (ScaNN)
     # ================================
-    num_execucoes = 100
+    num_execucoes = NUM_EXECUCOES_BUSCA
     soma_tempo_busca = 0.0
     I = None
     D = None
