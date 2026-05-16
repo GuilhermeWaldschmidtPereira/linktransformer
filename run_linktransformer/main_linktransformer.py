@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import sys
+import traceback
 from typing import List
 
 import numpy as np
@@ -108,25 +109,33 @@ def prepare_dataframes(df_base: pd.DataFrame, df_query: pd.DataFrame):
 
 
 def main() -> None:
-    df_base, df_query = load_input_data()
-    suffixes = ("_x", "_y")
+    print(f">>> Script em execução: {__file__}", flush=True)
+    print(f">>> Modelos configurados: {MODELOS_A_UTILIZAR}", flush=True)
 
-    # Mantém o comportamento anterior de main2.py: range(2) com i > 0 executava apenas k=1.
-    ks = [1]
+    try:
+        df_base, df_query = load_input_data()
+        suffixes = ("_x", "_y")
 
-    for modelo in MODELOS_A_UTILIZAR:
-        print(f">>> Iniciando processamento do modelo: {modelo}", flush=True)
-        assert_embeddings_exist(modelo)
-        df1, df2 = prepare_dataframes(df_base, df_query)
+        # Mantém o comportamento anterior de main2.py: range(2) com i > 0 executava apenas k=1.
+        ks = [1]
 
-        for k in ks:
-            print(f">>> Rodando LinkTransformer sem ScaNN | modelo={modelo} | k={k}")
-            print(
-                f">>> Tamanhos dos dataframes: df1={len(df1)} linhas | df2={len(df2)} linhas",
-                flush=True,
-            )
-            merge_knn(k, df1, df2, suffixes, modelo)
-            merge_knn2(k, df1, df2, suffixes, modelo)
+        for modelo in MODELOS_A_UTILIZAR:
+            print(f">>> Iniciando processamento do modelo: {modelo}", flush=True)
+            assert_embeddings_exist(modelo)
+            df1, df2 = prepare_dataframes(df_base, df_query)
+
+            for k in ks:
+                print(f">>> Rodando LinkTransformer sem ScaNN | modelo={modelo} | k={k}")
+                print(
+                    f">>> Tamanhos dos dataframes: df1={len(df1)} linhas | df2={len(df2)} linhas",
+                    flush=True,
+                )
+                merge_knn(k, df1, df2, suffixes, modelo)
+                merge_knn2(k, df1, df2, suffixes, modelo)
+    except Exception as exc:
+        print(f">>> ERRO em main_linktransformer.py: {type(exc).__name__}: {exc}", flush=True)
+        traceback.print_exc(file=sys.stdout)
+        raise
 
 
 if __name__ == "__main__":
