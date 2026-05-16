@@ -48,15 +48,21 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     if os.path.altsep:
         safe_model = safe_model.replace(os.path.altsep, "_")
 
+    print(f">>> [FAISS] Carregando embeddings do modelo: {model}", flush=True)
     embeddings1 = np.load(f"data/embeddings_base_{safe_model}.npy")
     embeddings2 = np.load(f"data/embeddings_query_{safe_model}.npy")
+    print(
+        f">>> [FAISS] Embeddings carregados | base={embeddings1.shape} | query={embeddings2.shape}",
+        flush=True,
+    )
 
     start_index_time = time.time()
     process = psutil.Process(os.getpid())
     mem_before = process.memory_info().rss / (1024 ** 2)  # MB
     
+    print(">>> [FAISS] Criando índice IndexFlatIP...", flush=True)
     index = faiss.IndexFlatIP(embeddings1.shape[1])
-    print("Adding embeddings to index")
+    print(">>> [FAISS] Adicionando embeddings base ao índice...", flush=True)
     index.add(embeddings1)
     
     mem_after = process.memory_info().rss / (1024 ** 2)  # MB
@@ -81,6 +87,7 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
         "memoria_usada_busca_MB": [],
     }
 
+    print(">>> [FAISS] Iniciando busca KNN...", flush=True)
     for i in range(num_execucoes):
         start_search_time = time.time()
         mem_before = process.memory_info().rss / (1024 ** 2)  # MB
@@ -190,8 +197,13 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     if os.path.altsep:
         safe_model = safe_model.replace(os.path.altsep, "_")
 
+    print(f">>> [SVS] Carregando embeddings do modelo: {model}", flush=True)
     embeddings1 = np.load(f"data/embeddings_base_{safe_model}.npy")
     embeddings2 = np.load(f"data/embeddings_query_{safe_model}.npy")
+    print(
+        f">>> [SVS] Embeddings carregados | base={embeddings1.shape} | query={embeddings2.shape}",
+        flush=True,
+    )
 
     # ================================
     #     INDEXAÇÃO (SVS / Vamana)
@@ -206,6 +218,7 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     process = psutil.Process(os.getpid())
     mem_before = process.memory_info().rss / (1024 ** 2)  # MB
     
+    print(">>> [SVS] Construindo índice Vamana...", flush=True)
     index = class_svs.build(
         base_embeddings=embeddings1,        # base indexada (df2)
         reduced_dims=128,                   # projeção para 128D
@@ -241,6 +254,7 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
 
 
     print("Searching SVS index")
+    print(">>> [SVS] Iniciando busca KNN...", flush=True)
     for i in range(num_execucoes):
         start_search_time = time.time()
         # consultas: embeddings1 (df1) procurando em embeddings2 (df2)

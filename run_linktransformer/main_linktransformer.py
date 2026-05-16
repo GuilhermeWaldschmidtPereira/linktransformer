@@ -115,11 +115,16 @@ def main() -> None:
     ks = [1]
 
     for modelo in MODELOS_A_UTILIZAR:
+        print(f">>> Iniciando processamento do modelo: {modelo}", flush=True)
         assert_embeddings_exist(modelo)
         df1, df2 = prepare_dataframes(df_base, df_query)
 
         for k in ks:
             print(f">>> Rodando LinkTransformer sem ScaNN | modelo={modelo} | k={k}")
+            print(
+                f">>> Tamanhos dos dataframes: df1={len(df1)} linhas | df2={len(df2)} linhas",
+                flush=True,
+            )
             merge_knn(k, df1, df2, suffixes, modelo)
             merge_knn2(k, df1, df2, suffixes, modelo)
 
