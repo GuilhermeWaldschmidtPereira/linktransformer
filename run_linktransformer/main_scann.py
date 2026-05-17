@@ -41,6 +41,27 @@ modelos_a_utilizar = [
 
 # modelos_a_utilizar = ["sentence-transformers/all-MiniLM-L6-v2"]
 
+def read_csv_with_fallback(path: str) -> pd.DataFrame:
+    file_size_mb = os.path.getsize(path) / (1024 * 1024)
+    print(f">>> Arquivo {path} ({file_size_mb:.2f} MB)", flush=True)
+
+    for sep in [",", ";"]:
+        try:
+            print(f">>> Tentando ler {path} com sep='{sep}'...", flush=True)
+            df = pd.read_csv(path, sep=sep)
+            print(
+                f"    Sucesso! Arquivo lido com sep='{sep}' | linhas={len(df)} | colunas={len(df.columns)}",
+                flush=True,
+            )
+            return df
+        except pd.errors.ParserError as e:
+            print(f"    Falha com sep='{sep}': ParserError -> {str(e)[:150]}", flush=True)
+        except Exception as e:
+            print(f"    Falha com sep='{sep}': {type(e).__name__} -> {str(e)[:150]}", flush=True)
+            continue
+
+    raise ValueError(f"Não consegui ler {path} com nenhum separador testado (,;)")
+
 def main():
     # ==========================================
     # 2) Ler os CSV de endereços
@@ -58,8 +79,8 @@ def main():
     embeddings_query_path = os.path.join(data_dir, "embeddings_query.npy")
     embeddings_base_path = os.path.join(data_dir, "embeddings_base.npy")
 
-    df_base = pd.read_csv(base_path)
-    df_query = pd.read_csv(query_path)
+    df_base = read_csv_with_fallback(base_path)
+    df_query = read_csv_with_fallback(query_path)
 
     # -------------------------
     # Configurações
@@ -169,8 +190,8 @@ def main():
             print(f"Embeddings salvos em: {emb_dir}")
             
         else:
-            df_base = pd.read_csv(base_path)
-            df_query = pd.read_csv(query_path)
+            df_base = read_csv_with_fallback(base_path)
+            df_query = read_csv_with_fallback(query_path)
 
             if left_on is None:
                 left_on = on
