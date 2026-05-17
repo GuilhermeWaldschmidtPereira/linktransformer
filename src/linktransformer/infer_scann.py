@@ -173,7 +173,7 @@ def merge_knn_scann(
     # 8) SALVAR MÉDIAS (results.csv)
     # ================================
     total_time = index_time + avg_search_time
-    matches = (df_lm_matched["setor_esperado_x"] == df_lm_matched["setor_esperado_y"]).sum()
+    matches = (df_lm_matched["setor_censitario_x"] == df_lm_matched["setor_censitario_y"]).sum()
 
     results_data = {
         "metodo": ["scann"],

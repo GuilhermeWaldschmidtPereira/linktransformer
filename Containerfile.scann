@@ -1,0 +1,26 @@
+FROM python:3.10-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONPATH="/workspace/src"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        cmake \
+        git \
+        libopenblas-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# Mantém cache de build eficiente: só reinstala dependências quando requirements mudar
+COPY requirements_scann.txt /tmp/requirements_scann.txt
+
+RUN python -m pip install --upgrade pip setuptools wheel \
+    && python -m pip install --no-cache-dir -r /tmp/requirements_scann.txt
+
+# Garante compatibilidade com o conjunto de dependências do projeto em Python 3.10.
+# Se o requirements mudar, o cache desta camada também será invalidado.
+
+CMD ["python", "/workspace/run_linktransformer/main_scann.py"]

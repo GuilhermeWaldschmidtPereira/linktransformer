@@ -4,7 +4,8 @@ set -e  # se qualquer comando falhar, o script para
 # Create results file
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGE_NAME="${LINKTRANSFORMER_IMAGE:-localhost/projeto-mestrado-linktransformer:latest}"
+IMAGE_LINKTRANSFORMER="${LINKTRANSFORMER_IMAGE:-localhost/projeto-mestrado-linktransformer:latest}"
+IMAGE_SCANN="${SCANN_IMAGE:-localhost/projeto-mestrado-scann:latest}"
 
 if ! command -v podman >/dev/null 2>&1; then
   echo "Erro: podman não está instalado ou não está disponível no PATH." >&2
@@ -20,14 +21,6 @@ echo "metodo,modelo_embedding,index_time,search_time,total_time,num_rows_df1,num
 ########################################
 # Podman - LinkTransformer sem ScaNN
 ########################################
-if ! podman image exists "${IMAGE_NAME}"; then
-  echo ">>> Imagem ${IMAGE_NAME} não encontrada. Construindo com Podman..."
-  podman build \
-    --layers \
-    -f "${PROJECT_ROOT}/Containerfile.linktransformer" \
-    -t "${IMAGE_NAME}" \
-    "${PROJECT_ROOT}"
-fi
 
 echo ">>> Rodando LinkTransformer sem ScaNN via Podman..."
 podman run --rm \
@@ -35,7 +28,7 @@ podman run --rm \
   --user "$(id -u):$(id -g)" \
   -v "${PROJECT_ROOT}:/workspace:Z" \
   -w /workspace \
-  "${IMAGE_NAME}" \
+  "${IMAGE_LINKTRANSFORMER}" \
   python /workspace/run_linktransformer/main_linktransformer.py
 
 echo ">>> Rodando NMSLIB via Podman..."
@@ -44,7 +37,7 @@ podman run --rm \
   --user "$(id -u):$(id -g)" \
   -v "${PROJECT_ROOT}:/workspace:Z" \
   -w /workspace \
-  "${IMAGE_NAME}" \
+  "${IMAGE_LINKTRANSFORMER}" \
   python /workspace/run_linktransformer/main_nmslib_runner.py
 
 echo ">>> Rodando HNSW Julia via Podman..."
@@ -53,7 +46,17 @@ podman run --rm \
   --user "$(id -u):$(id -g)" \
   -v "${PROJECT_ROOT}:/workspace:Z" \
   -w /workspace \
-  "${IMAGE_NAME}" \
+  "${IMAGE_LINKTRANSFORMER}" \
   python-jl /workspace/run_linktransformer/main_hnsw_julia.py
 
-echo ">>> FIM dos experimentos LinkTransformer sem ScaNN."
+echo ">>> Rodando ScaNN via Podman (imagem dedicada)..."
+podman run --rm \
+  --userns=keep-id \
+  --user "$(id -u):$(id -g)" \
+  -v "${PROJECT_ROOT}:/workspace:Z" \
+  -w /workspace \
+  "${IMAGE_SCANN}" \
+  python /workspace/run_linktransformer/main_scann.py
+
+
+echo ">>> FIM de todos os experimentos."
