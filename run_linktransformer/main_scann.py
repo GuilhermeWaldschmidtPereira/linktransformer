@@ -3,13 +3,11 @@
 #!/usr/bin/env python3
 import os
 import sys
-import time
 from typing import Union, List, Optional
 
 
 import numpy as np
 import pandas as pd
-from pandas import DataFrame
 
 
 # ======================================================
@@ -22,13 +20,6 @@ SRC_DIR = os.path.join(REPO_ROOT, "src")
 
 if SRC_DIR not in sys.path:
     sys.path.append(SRC_DIR)
-
-# Agora podemos importar do pacote linktransformer
-from linktransformer.utils import (
-    serialize_columns,
-    infer_embeddings,
-    load_model,
-)
 
 # Agora podemos importar direto do arquivo infer.py
 from linktransformer.infer_scann import merge_knn_scann
@@ -75,9 +66,13 @@ def main():
     if not os.path.exists(query_path):
         raise FileNotFoundError(f"Não encontrei {query_path}")
 
-    # Verificar se os arquivos de embeddings já existem
     embeddings_query_path = os.path.join(data_dir, "embeddings_query.npy")
     embeddings_base_path = os.path.join(data_dir, "embeddings_base.npy")
+
+    if not os.path.exists(embeddings_base_path):
+        raise FileNotFoundError(f"Não encontrei {embeddings_base_path}")
+    if not os.path.exists(embeddings_query_path):
+        raise FileNotFoundError(f"Não encontrei {embeddings_query_path}")
 
     df_base = read_csv_with_fallback(base_path)
     df_query = read_csv_with_fallback(query_path)
@@ -89,10 +84,7 @@ def main():
     left_on: Optional[Union[str, List[str]]] = None
     right_on: Optional[Union[str, List[str]]] = None
     for modelo in modelos_a_utilizar:
-        model: Union[str, object] = modelo
         suffixes = ("_x", "_y")
-        batch_size = 128
-        openai_key: Optional[str] = None  # se for usar OpenAI, coloque aqui
 
         # -------------------------
         # 3) Escolher colunas de junção
@@ -120,98 +112,6 @@ def main():
 
         df1.loc[:, "id_lt"] = np.arange(len(df1))
         df2.loc[:, "id_lt"] = np.arange(len(df2))
-
-        if not (os.path.exists(embeddings_query_path) and os.path.exists(embeddings_base_path)):
-            print(f"Embeddings não encontrados. Serão gerados novamente.")
-
-            # -------------------------
-            # 4) Serializar colunas (usa utils do linktransformer)
-            # -------------------------
-            if isinstance(right_on, list):
-                strings_right = serialize_columns(df2, right_on, model=model)
-            else:
-                # caso simples: uma única coluna em cada lado
-                strings_right = df2[right_on].tolist()
-
-            if isinstance(left_on, list):
-                strings_left = serialize_columns(df1, left_on, model=model)
-            else:
-                strings_left = df1[left_on].tolist()
-
-            # -------------------------
-            # 5) Carregar modelo e inferir embeddings
-            # -------------------------
-            if isinstance(model, str):
-                if openai_key is None:
-                    print(f"Carregando modelo {model} via linktransformer.load_model...")
-                    model = load_model(model)
-
-            print("Inferindo embeddings para df_query (df1)...")
-            embeddings1 = infer_embeddings(
-                strings_left,
-                model,
-                batch_size=batch_size,
-                openai_key=openai_key,
-                return_numpy=True,
-            )
-
-            print("Inferindo embeddings para df_base (df2)...")
-            embeddings2 = infer_embeddings(
-                strings_right,
-                model,
-                batch_size=batch_size,
-                openai_key=openai_key,
-                return_numpy=True,
-            )
-
-            # Garantir shape 2D
-            if embeddings1.ndim == 1:
-                embeddings1 = np.expand_dims(embeddings1, axis=0)
-            if embeddings2.ndim == 1:
-                embeddings2 = np.expand_dims(embeddings2, axis=0)
-
-            # Normaliza embeddings -> cosine / dot_product-friendly
-            embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
-            embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
-
-            print(f"embeddings1 shape: {embeddings1.shape}")
-            print(f"embeddings2 shape: {embeddings2.shape}")
-
-            # ----------------------------------------
-            # 6) (Opcional) salvar embeddings em .npy
-            #    para outros scripts (FAISS, SVS, HNSW, ScaNN, etc.)
-            # ----------------------------------------
-            emb_dir = os.path.join(THIS_DIR, "embeddings")
-            os.makedirs(emb_dir, exist_ok=True)
-
-            np.save(os.path.join(f"{data_dir}/embeddings_base.npy"), embeddings1.astype(np.float32))
-            np.save(os.path.join(f"{data_dir}/embeddings_query.npy"), embeddings2.astype(np.float32))
-
-            print(f"Embeddings salvos em: {emb_dir}")
-            
-        else:
-            df_base = read_csv_with_fallback(base_path)
-            df_query = read_csv_with_fallback(query_path)
-
-            if left_on is None:
-                left_on = on
-            if right_on is None:
-                right_on = on
-
-            # não usamos mais "on" diretamente
-            on = None
-
-            df1 = df_base.copy()
-            df2 = df_query.copy()
-
-            # garantir que não existe id_lt
-            if "id_lt" in df1.columns:
-                raise ValueError("Column id_lt already exists in df_base, renomeie antes de continuar")
-            if "id_lt" in df2.columns:
-                raise ValueError("Column id_lt already exists in df_query, renomeie antes de continuar")
-
-            df1.loc[:, "id_lt"] = np.arange(len(df1))
-            df2.loc[:, "id_lt"] = np.arange(len(df2))
 
         k = 2
         for i in range(k):
