@@ -86,9 +86,9 @@ def merge_knn_scann(
     print(f"[ScaNN] Indexação: {index_time:.4f}s | Memória: {mem_used_create_index:.2f} MB")
 
     # ================================
-    # 4) BUSCA KNN (100 execuções)
+    # 4) BUSCA KNN (1 execução)
     # ================================
-    num_execucoes = 100
+    num_execucoes = 1
     soma_tempo_busca = 0.0
     soma_memoria = 0.0
 
