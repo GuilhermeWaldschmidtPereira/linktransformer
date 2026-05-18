@@ -7,6 +7,8 @@ IMAGE_NAME="${IMAGE_NAME:-}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-}"
 REQ_HASH="$(sha256sum "${REPO_ROOT}/requirements-embeddings.txt" | awk '{print substr($1,1,16)}')"
 BASE_IMAGE_NAME="${BASE_IMAGE_NAME:-}"
+HOST_DATA_DIR="${HOST_DATA_DIR:-${REPO_ROOT}/data}"
+CONTAINER_DATA_DIR="${CONTAINER_DATA_DIR:-/data}"
 
 if [[ -z "${CONTAINER_RUNTIME}" ]]; then
   if command -v podman >/dev/null 2>&1; then
@@ -35,7 +37,7 @@ if [[ -z "${BASE_IMAGE_NAME}" ]]; then
   fi
 fi
 
-VOLUME_MOUNT="${REPO_ROOT}/data:/data"
+VOLUME_MOUNT="${HOST_DATA_DIR}:${CONTAINER_DATA_DIR}"
 if [[ "${CONTAINER_RUNTIME}" == "podman" ]]; then
   VOLUME_MOUNT="${VOLUME_MOUNT}:Z"
 fi
@@ -60,7 +62,7 @@ fi
 "${CONTAINER_RUNTIME}" run --rm \
   -v "${VOLUME_MOUNT}" \
   "${IMAGE_NAME}" \
-  --base-path /data/base.csv \
-  --query-path /data/query.csv \
-  --output-dir /data \
+  --base-path "${CONTAINER_DATA_DIR}/base.csv" \
+  --query-path "${CONTAINER_DATA_DIR}/query.csv" \
+  --output-dir "${CONTAINER_DATA_DIR}" \
   "$@"
