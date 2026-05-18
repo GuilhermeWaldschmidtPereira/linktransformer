@@ -30,6 +30,74 @@ df_geral = pd.DataFrame(columns=[
 
 df_geral.to_csv(PATH_resultados_scann, index=False)
 
+
+def get_env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    return int(value)
+
+
+def get_env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    return float(value)
+
+
+def build_scann_searcher(embeddings1: np.ndarray, k: int):
+    import scann
+
+    builder_mode = os.environ.get("SCANN_BUILDER_MODE", "brute_force").strip().lower()
+    print(f">>> [ScaNN] Modo do builder: {builder_mode}", flush=True)
+
+    base_builder = scann.scann_ops_pybind.builder(
+        embeddings1,
+        k,
+        "dot_product",
+    )
+
+    if builder_mode == "brute_force":
+        print(">>> [ScaNN] Usando score_brute_force() (comportamento atual/padrão).", flush=True)
+        return base_builder.score_brute_force()
+
+    if builder_mode == "tree_ah":
+        num_leaves = get_env_int("SCANN_NUM_LEAVES", 2000)
+        num_leaves_to_search = get_env_int("SCANN_NUM_LEAVES_TO_SEARCH", 100)
+        training_sample_size = get_env_int("SCANN_TRAINING_SAMPLE_SIZE", 250000)
+        dimensions_per_block = get_env_int("SCANN_DIMENSIONS_PER_BLOCK", 2)
+        aq_threshold = get_env_float("SCANN_AH_THRESHOLD", 0.2)
+        reorder_k = get_env_int("SCANN_REORDER_K", 100)
+
+        print(
+            ">>> [ScaNN] Usando tree + score_ah + reorder "
+            f"| num_leaves={num_leaves} "
+            f"| num_leaves_to_search={num_leaves_to_search} "
+            f"| training_sample_size={training_sample_size} "
+            f"| dimensions_per_block={dimensions_per_block} "
+            f"| anisotropic_quantization_threshold={aq_threshold} "
+            f"| reorder_k={reorder_k}",
+            flush=True,
+        )
+
+        return (
+            base_builder
+            .tree(
+                num_leaves=num_leaves,
+                num_leaves_to_search=num_leaves_to_search,
+                training_sample_size=training_sample_size,
+            )
+            .score_ah(
+                dimensions_per_block,
+                anisotropic_quantization_threshold=aq_threshold,
+            )
+            .reorder(reorder_k)
+        )
+
+    raise ValueError(
+        "SCANN_BUILDER_MODE inválido. Use 'brute_force' ou 'tree_ah'."
+    )
+
 def merge_knn_scann(
     k, 
     df1,
@@ -85,11 +153,6 @@ def merge_knn_scann(
     embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
     print(">>> [ScaNN] Normalização concluída.", flush=True)
 
-    # ================================
-    # 3) INDEXAÇÃO (ScaNN)
-    # ================================
-    import scann
-
     mem_before = process.memory_info().rss / (1024 ** 2)
 
     start_index_time = time.time()
@@ -98,11 +161,7 @@ def merge_knn_scann(
         flush=True,
     )
 
-    builder = scann.scann_ops_pybind.builder(
-        embeddings1,
-        k,
-        "dot_product",
-    ).score_brute_force()
+    builder = build_scann_searcher(embeddings1, k)
     print(">>> [ScaNN] Builder criado. Iniciando build do searcher...", flush=True)
 
     searcher = builder.build()
@@ -119,9 +178,25 @@ def merge_knn_scann(
     )
 
     # ================================
-    # 4) BUSCA KNN (1 execução)
+    # 4) BUSCA KNN
     # ================================
-    num_execucoes = 1
+    num_execucoes = get_env_int("SCANN_NUM_EXECUCOES", 1)
+    query_batch_size = get_env_int("SCANN_QUERY_BATCH_SIZE", 0)
+    leaves_to_search_override = os.environ.get("SCANN_LEAVES_TO_SEARCH")
+    pre_reorder_override = os.environ.get("SCANN_PRE_REORDER_NUM_NEIGHBORS")
+
+    search_kwargs = {"final_num_neighbors": k}
+    if leaves_to_search_override not in (None, ""):
+        search_kwargs["leaves_to_search"] = int(leaves_to_search_override)
+    if pre_reorder_override not in (None, ""):
+        search_kwargs["pre_reorder_num_neighbors"] = int(pre_reorder_override)
+
+    print(
+        f">>> [ScaNN] Configuração de busca | execuções={num_execucoes} "
+        f"| query_batch_size={query_batch_size if query_batch_size > 0 else 'all'} "
+        f"| search_kwargs={search_kwargs}",
+        flush=True,
+    )
     soma_tempo_busca = 0.0
     soma_memoria = 0.0
 
@@ -138,10 +213,34 @@ def merge_knn_scann(
         mem_before = process.memory_info().rss / (1024 ** 2)
         start_search_time = time.time()
 
-        I, D = searcher.search_batched(
-            embeddings2,
-            final_num_neighbors=k,
-        )
+        if query_batch_size > 0:
+            print(
+                f">>> [ScaNN] Processando queries em chunks de {query_batch_size}...",
+                flush=True,
+            )
+            result_indices = []
+            result_distances = []
+
+            for start_idx in range(0, len(embeddings2), query_batch_size):
+                end_idx = min(start_idx + query_batch_size, len(embeddings2))
+                print(
+                    f">>> [ScaNN] Chunk de queries: {start_idx}:{end_idx}",
+                    flush=True,
+                )
+                chunk_I, chunk_D = searcher.search_batched(
+                    embeddings2[start_idx:end_idx],
+                    **search_kwargs,
+                )
+                result_indices.append(chunk_I)
+                result_distances.append(chunk_D)
+
+            I = np.vstack(result_indices)
+            D = np.vstack(result_distances)
+        else:
+            I, D = searcher.search_batched(
+                embeddings2,
+                **search_kwargs,
+            )
 
         search_time = time.time() - start_search_time
         mem_after = process.memory_info().rss / (1024 ** 2)
