@@ -5,4 +5,4 @@ WORKDIR /app
 
 COPY run_linktransformer ./run_linktransformer
 
-ENTRYPOINT ["python3", "run_linktransformer/run_embeddings.py"]
+ENTRYPOINT ["python3", "run_linktransformer/run_embeddings_partitioned.py"]
