@@ -53,6 +53,17 @@ echo ">>> Rodando ScaNN via Podman (imagem dedicada)..."
 podman run --rm \
   --userns=keep-id \
   --user "$(id -u):$(id -g)" \
+  -e SCANN_BUILDER_MODE \
+  -e SCANN_NUM_EXECUCOES \
+  -e SCANN_QUERY_BATCH_SIZE \
+  -e SCANN_NUM_LEAVES \
+  -e SCANN_NUM_LEAVES_TO_SEARCH \
+  -e SCANN_TRAINING_SAMPLE_SIZE \
+  -e SCANN_DIMENSIONS_PER_BLOCK \
+  -e SCANN_AH_THRESHOLD \
+  -e SCANN_REORDER_K \
+  -e SCANN_LEAVES_TO_SEARCH \
+  -e SCANN_PRE_REORDER_NUM_NEIGHBORS \
   -v "${PROJECT_ROOT}:/workspace:Z" \
   -w /workspace \
   "${IMAGE_SCANN}" \

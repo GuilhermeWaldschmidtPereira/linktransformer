@@ -180,7 +180,7 @@ def merge_knn_scann(
     # ================================
     # 4) BUSCA KNN
     # ================================
-    num_execucoes = get_env_int("SCANN_NUM_EXECUCOES", 1)
+    num_execucoes = get_env_int("SCANN_NUM_EXECUCOES", 5)
     query_batch_size = get_env_int("SCANN_QUERY_BATCH_SIZE", 0)
     leaves_to_search_override = os.environ.get("SCANN_LEAVES_TO_SEARCH")
     pre_reorder_override = os.environ.get("SCANN_PRE_REORDER_NUM_NEIGHBORS")
