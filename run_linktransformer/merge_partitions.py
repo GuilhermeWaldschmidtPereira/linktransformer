@@ -8,7 +8,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -79,37 +79,50 @@ def merge_partitions(
         print(f">>> Primeira: {partitions[0].name}")
         print(f">>> Última: {partitions[-1].name}")
 
-    # Carregar e mesclar
-    arrays = []
+    merged_memmap: Optional[np.memmap] = None
+    write_offset = 0
+    total_rows = 0
+
     for i, partition_file in enumerate(partitions):
         if verbose:
             print(f"  [{i + 1}/{len(partitions)}] Carregando {partition_file.name}...", end="", flush=True)
 
         arr = np.load(partition_file)
-        arrays.append(arr)
+        arr = np.asarray(arr, dtype=np.float32)
+        rows = arr.shape[0]
+
+        if merged_memmap is None:
+            output_dir = os.path.dirname(output_path)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
+            total_rows = sum(np.load(path, mmap_mode="r").shape[0] for path in partitions)
+            merged_memmap = np.lib.format.open_memmap(
+                output_path,
+                mode="w+",
+                dtype=np.float32,
+                shape=(total_rows, arr.shape[1]),
+            )
+
+        merged_memmap[write_offset:write_offset + rows] = arr
+        write_offset += rows
 
         if verbose:
             print(f" shape={arr.shape}")
 
-    # Mesclar
-    if verbose:
-        print(f">>> Mesclando {len(arrays)} arrays...", flush=True)
-
-    merged = np.concatenate(arrays, axis=0)
-
-    if verbose:
-        print(f">>> Array mesclado: shape={merged.shape}, dtype={merged.dtype}")
-
-    # Salvar
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    np.save(output_path, merged.astype(np.float32))
+    if merged_memmap is not None:
+        merged_memmap.flush()
+        merged_shape = merged_memmap.shape
+        del merged_memmap
+    else:
+        merged_shape = (0, 0)
 
     if verbose:
+        print(f">>> Array mesclado: shape={merged_shape}, dtype=float32")
         file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
         print(f">>> Salvo em: {output_path}")
         print(f">>> Tamanho: {file_size_mb:.2f} MB")
 
-    return len(partitions), merged.shape[0]
+    return len(partitions), merged_shape[0]
 
 
 def main() -> None:

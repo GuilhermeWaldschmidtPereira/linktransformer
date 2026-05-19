@@ -6,15 +6,17 @@ Lê o CSV da base em partições de 100k linhas, gera embeddings para cada parti
 e salva os resultados em pastas separadas por modelo.
 """
 import argparse
+import gc
 import json
 import os
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Iterator, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 
 # Adiciona o diretório do projeto ao path
 THIS_DIR = os.path.dirname(__file__)
@@ -26,14 +28,11 @@ from run_embeddings import (
     build_embeddings,
     current_memory_mb,
     elapsed_summary,
-    ensure_2d_normalized,
-    load_dataframe,
     normalize_column_spec,
     resolve_columns,
     resolve_csv_separator,
     resolve_single_side_columns,
     safe_model_name,
-    serialize_embedding_input,
 )
 
 
@@ -99,17 +98,143 @@ def get_merged_output_path(base_output_dir: str, model_name: str, side: str) -> 
     return os.path.join(base_output_dir, f"embeddings_{side}_{safe_model}.npy")
 
 
+def infer_file_format(path: str) -> str:
+    suffix = Path(path).suffix.lower()
+    if suffix == ".csv":
+        return "csv"
+    if suffix in {".parquet", ".pq"}:
+        return "parquet"
+    raise ValueError(f"Formato de arquivo não suportado para {path}. Use .csv, .parquet ou .pq.")
+
+
+def load_dataframe_columns(path: str, csv_encoding: Optional[str] = None) -> pd.DataFrame:
+    """Carrega apenas o cabeçalho/metadata para resolver colunas sem materializar tudo em memória."""
+    file_format = infer_file_format(path)
+    if file_format == "csv":
+        sep = resolve_csv_separator(path)
+        if csv_encoding:
+            return pd.read_csv(path, encoding=csv_encoding, sep=sep, nrows=0)
+
+        candidate_encodings = ["utf-8", "utf-8-sig", "latin1", "cp1252"]
+        last_error: Optional[UnicodeDecodeError] = None
+        for candidate in candidate_encodings:
+            try:
+                return pd.read_csv(path, encoding=candidate, sep=sep, nrows=0)
+            except UnicodeDecodeError as exc:
+                last_error = exc
+
+        raise UnicodeDecodeError(
+            last_error.encoding if last_error else "utf-8",
+            last_error.object if last_error else b"",
+            last_error.start if last_error else 0,
+            last_error.end if last_error else 1,
+            f"Nao foi possivel ler o cabeçalho de {path} com os encodings testados.",
+        )
+
+    parquet_file = pq.ParquetFile(path)
+    return pd.DataFrame(columns=parquet_file.schema.names)
+
+
+def count_rows(path: str) -> int:
+    """Conta linhas sem carregar o dataset inteiro em memória."""
+    file_format = infer_file_format(path)
+    if file_format == "csv":
+        with open(path, "rb") as handle:
+            line_count = sum(chunk.count(b"\n") for chunk in iter(lambda: handle.read(1024 * 1024), b""))
+        return max(line_count - 1, 0)
+
+    parquet_file = pq.ParquetFile(path)
+    return parquet_file.metadata.num_rows
+
+
+def iter_dataframe_partitions(
+    path: str,
+    partition_size: int,
+    csv_encoding: Optional[str] = None,
+) -> Iterator[pd.DataFrame]:
+    """Itera partições do dataset sem carregar tudo na memória de uma vez."""
+    file_format = infer_file_format(path)
+
+    if file_format == "csv":
+        sep = resolve_csv_separator(path)
+        if csv_encoding:
+            yield from pd.read_csv(path, encoding=csv_encoding, sep=sep, chunksize=partition_size)
+            return
+
+        candidate_encodings = ["utf-8", "utf-8-sig", "latin1", "cp1252"]
+        last_error: Optional[UnicodeDecodeError] = None
+        for candidate in candidate_encodings:
+            try:
+                reader = pd.read_csv(path, encoding=candidate, sep=sep, chunksize=partition_size)
+                iterator = iter(reader)
+                first_chunk = next(iterator)
+            except StopIteration:
+                return
+            except UnicodeDecodeError as exc:
+                last_error = exc
+                continue
+
+            yield first_chunk
+            yield from iterator
+            return
+
+        raise UnicodeDecodeError(
+            last_error.encoding if last_error else "utf-8",
+            last_error.object if last_error else b"",
+            last_error.start if last_error else 0,
+            last_error.end if last_error else 1,
+            f"Nao foi possivel iterar {path} com os encodings testados.",
+        )
+
+    parquet_file = pq.ParquetFile(path)
+    for batch in parquet_file.iter_batches(batch_size=partition_size):
+        yield batch.to_pandas()
+
+
+def init_merged_memmap(output_path: str, total_rows: int, embedding_dim: int) -> np.memmap:
+    """Cria o arquivo final no disco sem concatenar tudo na RAM."""
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    return np.lib.format.open_memmap(
+        output_path,
+        mode="w+",
+        dtype=np.float32,
+        shape=(total_rows, embedding_dim),
+    )
+
+
+def write_to_merged_memmap(
+    merged_memmap: Optional[np.memmap],
+    merged_output_path: str,
+    total_rows: int,
+    offset: int,
+    embeddings_partition: np.ndarray,
+) -> Tuple[np.memmap, int]:
+    """Escreve uma partição no arquivo final mesclado em disco."""
+    embeddings_partition = np.asarray(embeddings_partition, dtype=np.float32)
+    if merged_memmap is None:
+        merged_memmap = init_merged_memmap(
+            merged_output_path,
+            total_rows=total_rows,
+            embedding_dim=embeddings_partition.shape[1],
+        )
+
+    rows = embeddings_partition.shape[0]
+    merged_memmap[offset:offset + rows] = embeddings_partition
+    return merged_memmap, offset + rows
+
+
 def process_base_partitioned(
     args: argparse.Namespace,
     models: List[str],
     manifest: List[dict],
 ) -> None:
     """Processa apenas a base em partições."""
-    print(f">>> Carregando base para processamento particionado...", flush=True)
-    df_base = load_dataframe(args.base_path, csv_encoding=args.csv_encoding)
+    print(f">>> Preparando base para processamento particionado...", flush=True)
     base_columns = resolve_single_side_columns(args.left_on, normalize_column_spec(args.on), "left")
 
-    num_rows = len(df_base)
+    num_rows = count_rows(args.base_path)
     num_partitions = (num_rows + args.partition_size - 1) // args.partition_size
     print(f">>> Base com {num_rows} linhas | {num_partitions} partições de {args.partition_size} linhas", flush=True)
 
@@ -121,12 +246,19 @@ def process_base_partitioned(
         partition_dir = get_partition_output_dir(args.output_dir, model_name)
         os.makedirs(partition_dir, exist_ok=True)
 
-        all_embeddings = []
+        merged_memmap = None
+        merged_offset = 0
+        merged_path = get_merged_output_path(args.output_dir, model_name, "base")
 
-        for partition_idx in range(num_partitions):
+        for partition_idx, df_partition in enumerate(
+            iter_dataframe_partitions(
+                args.base_path,
+                partition_size=args.partition_size,
+                csv_encoding=args.csv_encoding,
+            )
+        ):
             start_idx = partition_idx * args.partition_size
             end_idx = min(start_idx + args.partition_size, num_rows)
-            df_partition = df_base.iloc[start_idx:end_idx].copy()
 
             print(
                 f"  Partição {partition_idx + 1}/{num_partitions} | "
@@ -148,18 +280,25 @@ def process_base_partitioned(
             os.makedirs(os.path.dirname(partition_path), exist_ok=True)
             np.save(partition_path, embeddings_partition.astype(np.float32))
 
+            if args.merge_partitions:
+                merged_memmap, merged_offset = write_to_merged_memmap(
+                    merged_memmap,
+                    merged_output_path=merged_path,
+                    total_rows=num_rows,
+                    offset=merged_offset,
+                    embeddings_partition=embeddings_partition,
+                )
+                merged_memmap.flush()
+
             partition_elapsed = time.perf_counter() - partition_start_time
             print(f"    Salvo: {partition_path} | {elapsed_summary(partition_elapsed)}", flush=True)
 
-            all_embeddings.append(embeddings_partition)
+            del embeddings_partition
+            del df_partition
+            gc.collect()
 
-        # Mescla as partições
-        if args.merge_partitions:
-            print(f"  Mesclando {len(all_embeddings)} partições...", flush=True)
-            merged_embeddings = np.concatenate(all_embeddings, axis=0)
-            merged_path = get_merged_output_path(args.output_dir, model_name, "base")
-            os.makedirs(os.path.dirname(merged_path), exist_ok=True)
-            np.save(merged_path, merged_embeddings.astype(np.float32))
+        if args.merge_partitions and merged_memmap is not None:
+            del merged_memmap
             print(f"  Embeddings mesclados salvos em: {merged_path}", flush=True)
 
         elapsed_seconds = time.perf_counter() - model_start_time
@@ -202,14 +341,14 @@ def process_both_partitioned(
     manifest: List[dict],
 ) -> None:
     """Processa base e query em partições."""
-    print(f">>> Carregando base e query para processamento particionado...", flush=True)
-    df_base = load_dataframe(args.base_path, csv_encoding=args.csv_encoding)
-    df_query = load_dataframe(args.query_path, csv_encoding=args.csv_encoding)
-    left_on, right_on = resolve_columns(args, df_base, df_query)
+    print(f">>> Preparando base e query para processamento particionado...", flush=True)
+    df_base_columns = load_dataframe_columns(args.base_path, csv_encoding=args.csv_encoding)
+    df_query_columns = load_dataframe_columns(args.query_path, csv_encoding=args.csv_encoding)
+    left_on, right_on = resolve_columns(args, df_base_columns, df_query_columns)
 
-    num_rows_base = len(df_base)
+    num_rows_base = count_rows(args.base_path)
     num_partitions_base = (num_rows_base + args.partition_size - 1) // args.partition_size
-    num_rows_query = len(df_query)
+    num_rows_query = count_rows(args.query_path)
     num_partitions_query = (num_rows_query + args.partition_size - 1) // args.partition_size
 
     print(
@@ -229,15 +368,24 @@ def process_both_partitioned(
         partition_dir = get_partition_output_dir(args.output_dir, model_name)
         os.makedirs(partition_dir, exist_ok=True)
 
-        all_embeddings_base = []
-        all_embeddings_query = []
+        merged_memmap_base = None
+        merged_memmap_query = None
+        merged_offset_base = 0
+        merged_offset_query = 0
+        merged_path_base = get_merged_output_path(args.output_dir, model_name, "base")
+        merged_path_query = get_merged_output_path(args.output_dir, model_name, "query")
 
         # Processa base
         print(f"  Processando base...", flush=True)
-        for partition_idx in range(num_partitions_base):
+        for partition_idx, df_partition in enumerate(
+            iter_dataframe_partitions(
+                args.base_path,
+                partition_size=args.partition_size,
+                csv_encoding=args.csv_encoding,
+            )
+        ):
             start_idx = partition_idx * args.partition_size
             end_idx = min(start_idx + args.partition_size, num_rows_base)
-            df_partition = df_base.iloc[start_idx:end_idx].copy()
 
             print(
                 f"    Partição base {partition_idx + 1}/{num_partitions_base} | "
@@ -259,17 +407,34 @@ def process_both_partitioned(
             os.makedirs(os.path.dirname(partition_path), exist_ok=True)
             np.save(partition_path, embeddings_partition.astype(np.float32))
 
+            if args.merge_partitions:
+                merged_memmap_base, merged_offset_base = write_to_merged_memmap(
+                    merged_memmap_base,
+                    merged_output_path=merged_path_base,
+                    total_rows=num_rows_base,
+                    offset=merged_offset_base,
+                    embeddings_partition=embeddings_partition,
+                )
+                merged_memmap_base.flush()
+
             partition_elapsed = time.perf_counter() - partition_start_time
             print(f"      Salvo: {partition_path} | {elapsed_summary(partition_elapsed)}", flush=True)
 
-            all_embeddings_base.append(embeddings_partition)
+            del embeddings_partition
+            del df_partition
+            gc.collect()
 
         # Processa query
         print(f"  Processando query...", flush=True)
-        for partition_idx in range(num_partitions_query):
+        for partition_idx, df_partition in enumerate(
+            iter_dataframe_partitions(
+                args.query_path,
+                partition_size=args.partition_size,
+                csv_encoding=args.csv_encoding,
+            )
+        ):
             start_idx = partition_idx * args.partition_size
             end_idx = min(start_idx + args.partition_size, num_rows_query)
-            df_partition = df_query.iloc[start_idx:end_idx].copy()
 
             print(
                 f"    Partição query {partition_idx + 1}/{num_partitions_query} | "
@@ -291,25 +456,29 @@ def process_both_partitioned(
             os.makedirs(os.path.dirname(partition_path), exist_ok=True)
             np.save(partition_path, embeddings_partition.astype(np.float32))
 
+            if args.merge_partitions:
+                merged_memmap_query, merged_offset_query = write_to_merged_memmap(
+                    merged_memmap_query,
+                    merged_output_path=merged_path_query,
+                    total_rows=num_rows_query,
+                    offset=merged_offset_query,
+                    embeddings_partition=embeddings_partition,
+                )
+                merged_memmap_query.flush()
+
             partition_elapsed = time.perf_counter() - partition_start_time
             print(f"      Salvo: {partition_path} | {elapsed_summary(partition_elapsed)}", flush=True)
 
-            all_embeddings_query.append(embeddings_partition)
+            del embeddings_partition
+            del df_partition
+            gc.collect()
 
-        # Mescla as partições
-        if args.merge_partitions:
-            print(f"  Mesclando {len(all_embeddings_base)} partições da base...", flush=True)
-            merged_embeddings_base = np.concatenate(all_embeddings_base, axis=0)
-            merged_path_base = get_merged_output_path(args.output_dir, model_name, "base")
-            os.makedirs(os.path.dirname(merged_path_base), exist_ok=True)
-            np.save(merged_path_base, merged_embeddings_base.astype(np.float32))
+        if args.merge_partitions and merged_memmap_base is not None:
+            del merged_memmap_base
             print(f"  Embeddings da base mesclados salvos em: {merged_path_base}", flush=True)
 
-            print(f"  Mesclando {len(all_embeddings_query)} partições da query...", flush=True)
-            merged_embeddings_query = np.concatenate(all_embeddings_query, axis=0)
-            merged_path_query = get_merged_output_path(args.output_dir, model_name, "query")
-            os.makedirs(os.path.dirname(merged_path_query), exist_ok=True)
-            np.save(merged_path_query, merged_embeddings_query.astype(np.float32))
+        if args.merge_partitions and merged_memmap_query is not None:
+            del merged_memmap_query
             print(f"  Embeddings da query mesclados salvos em: {merged_path_query}", flush=True)
 
         elapsed_seconds = time.perf_counter() - model_start_time
