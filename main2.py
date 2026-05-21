@@ -32,16 +32,13 @@ df["k"] = df["k"].astype(int)
 # ==========================
 df["Embedding_Label"] = df["modelo_embedding"].astype(str).str.lower().apply(
     lambda x:
-        "Modelo 1" if "intfloat/multilingual-e5-large" in x else
-        "Modelo 2" if "neuralmind/bert-large-portuguese-cased" in x else
         "Modelo 3" if "sentence-transformers/all-minilm-l6-v2" in x else
-        "Modelo 4" if "sentence-transformers/all-mpnet-base-v2" in x else
         None
 )
 
 df = df[df["Embedding_Label"].notna()]
 
-ordem_modelos = ["Modelo 1", "Modelo 2", "Modelo 3", "Modelo 4"]
+ordem_modelos = ["Modelo 3"]
 metodos = sorted(df["metodo"].unique())
 
 # ==========================
