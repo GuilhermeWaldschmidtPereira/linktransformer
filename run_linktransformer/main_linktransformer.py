@@ -127,7 +127,7 @@ def main() -> None:
                     f">>> Tamanhos dos dataframes: df1={len(df1)} linhas | df2={len(df2)} linhas",
                     flush=True,
                 )
-                merge_knn(k, df1, df2, suffixes, modelo)
+                #merge_knn(k, df1, df2, suffixes, modelo)
                 merge_knn2(k, df1, df2, suffixes, modelo)
     except Exception as exc:
         print(f">>> ERRO em main_linktransformer.py: {type(exc).__name__}: {exc}", flush=True)
