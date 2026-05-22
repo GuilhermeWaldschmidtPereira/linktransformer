@@ -4,7 +4,6 @@ import sys
 import traceback
 from typing import List
 
-import numpy as np
 import pandas as pd
 
 
@@ -91,20 +90,6 @@ def load_input_data():
     return read_csv_with_fallback(base_path), read_csv_with_fallback(query_path)
 
 
-def prepare_dataframes(df_base: pd.DataFrame, df_query: pd.DataFrame):
-    df1 = df_base.copy()
-    df2 = df_query.copy()
-
-    if "id_lt" in df1.columns:
-        raise ValueError("Column id_lt already exists in df_base, renomeie antes de continuar")
-    if "id_lt" in df2.columns:
-        raise ValueError("Column id_lt already exists in df_query, renomeie antes de continuar")
-
-    df1.loc[:, "id_lt"] = np.arange(len(df1))
-    df2.loc[:, "id_lt"] = np.arange(len(df2))
-    return df1, df2
-
-
 def main() -> None:
     print(f">>> Script em execução: {__file__}", flush=True)
     print(f">>> Modelos configurados: {MODELOS_A_UTILIZAR}", flush=True)
@@ -119,15 +104,14 @@ def main() -> None:
         for modelo in MODELOS_A_UTILIZAR:
             print(f">>> Iniciando processamento do modelo: {modelo}", flush=True)
             assert_embeddings_exist(modelo)
-            df1, df2 = prepare_dataframes(df_base, df_query)
 
             for k in ks:
                 print(f">>> Rodando ScaNN | modelo={modelo} | k={k}", flush=True)
                 print(
-                    f">>> Tamanhos dos dataframes: df1={len(df1)} linhas | df2={len(df2)} linhas",
+                    f">>> Tamanhos dos dataframes: df1={len(df_base)} linhas | df2={len(df_query)} linhas",
                     flush=True,
                 )
-                merge_knn_scann(k, df1, df2, suffixes, modelo)
+                merge_knn_scann(k, df_base, df_query, suffixes, modelo)
     except Exception as exc:
         print(f">>> ERRO em main_scann.py: {type(exc).__name__}: {exc}", flush=True)
         traceback.print_exc(file=sys.stdout)

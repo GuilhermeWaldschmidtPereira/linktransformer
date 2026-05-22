@@ -45,10 +45,43 @@ def get_env_float(name: str, default: float) -> float:
     return float(value)
 
 
+def get_scann_builder_mode() -> str:
+    return os.environ.get("SCANN_BUILDER_MODE", "brute_force").strip().lower()
+
+
+def normalize_embeddings(embeddings: np.ndarray) -> np.ndarray:
+    embeddings = np.asarray(embeddings, dtype=np.float32)
+    if not embeddings.flags.c_contiguous:
+        embeddings = np.ascontiguousarray(embeddings, dtype=np.float32)
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    np.maximum(norms, 1e-12, out=norms)
+    embeddings /= norms
+    return embeddings
+
+
+def resolve_query_batch_size(
+    requested_batch_size: int,
+    num_queries: int,
+    num_base_vectors: int,
+    builder_mode: str,
+) -> int:
+    if requested_batch_size > 0:
+        return min(requested_batch_size, num_queries)
+
+    if builder_mode != "brute_force":
+        return 0
+
+    score_budget_mb = get_env_int("SCANN_MAX_SCORE_MATRIX_MB", 256)
+    bytes_per_score = np.dtype(np.float32).itemsize
+    bytes_per_query = max(1, num_base_vectors * bytes_per_score)
+    auto_batch_size = max(1, (score_budget_mb * 1024 ** 2) // bytes_per_query)
+    return min(auto_batch_size, num_queries)
+
+
 def build_scann_searcher(embeddings1: np.ndarray, k: int):
     import scann
 
-    builder_mode = os.environ.get("SCANN_BUILDER_MODE", "brute_force").strip().lower()
+    builder_mode = get_scann_builder_mode()
     print(f">>> [ScaNN] Modo do builder: {builder_mode}", flush=True)
 
     base_builder = scann.scann_ops_pybind.builder(
@@ -141,17 +174,20 @@ def merge_knn_scann(
         flush=True,
     )
 
-    df1 = df1.copy().reset_index(drop=True)
-    df2 = df2.copy().reset_index(drop=True)
-
-    df1["id_lt"] = np.arange(len(df1))
-    df2["id_lt"] = np.arange(len(df2))
+    if not df1.index.equals(pd.RangeIndex(len(df1))):
+        df1 = df1.reset_index(drop=True)
+    if not df2.index.equals(pd.RangeIndex(len(df2))):
+        df2 = df2.reset_index(drop=True)
 
     print(">>> [ScaNN] Normalizando embeddings...", flush=True)
 
-    embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
-    embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
-    print(">>> [ScaNN] Normalização concluída.", flush=True)
+    embeddings1 = normalize_embeddings(embeddings1)
+    embeddings2 = normalize_embeddings(embeddings2)
+    print(
+        f">>> [ScaNN] Normalização concluída | base_dtype={embeddings1.dtype} | "
+        f"query_dtype={embeddings2.dtype}",
+        flush=True,
+    )
 
     mem_before = process.memory_info().rss / (1024 ** 2)
 
@@ -165,6 +201,7 @@ def merge_knn_scann(
     print(">>> [ScaNN] Builder criado. Iniciando build do searcher...", flush=True)
 
     searcher = builder.build()
+    del builder
     print(">>> [ScaNN] Searcher construído com sucesso.", flush=True)
 
     index_time = time.time() - start_index_time
@@ -181,7 +218,14 @@ def merge_knn_scann(
     # 4) BUSCA KNN
     # ================================
     num_execucoes = get_env_int("SCANN_NUM_EXECUCOES", 5)
-    query_batch_size = get_env_int("SCANN_QUERY_BATCH_SIZE", 0)
+    builder_mode = get_scann_builder_mode()
+    requested_query_batch_size = get_env_int("SCANN_QUERY_BATCH_SIZE", 0)
+    query_batch_size = resolve_query_batch_size(
+        requested_query_batch_size,
+        num_queries=len(embeddings2),
+        num_base_vectors=len(embeddings1),
+        builder_mode=builder_mode,
+    )
     leaves_to_search_override = os.environ.get("SCANN_LEAVES_TO_SEARCH")
     pre_reorder_override = os.environ.get("SCANN_PRE_REORDER_NUM_NEIGHBORS")
 
@@ -191,8 +235,23 @@ def merge_knn_scann(
     if pre_reorder_override not in (None, ""):
         search_kwargs["pre_reorder_num_neighbors"] = int(pre_reorder_override)
 
+    full_score_matrix_gb = (
+        len(embeddings1) * len(embeddings2) * np.dtype(np.float32).itemsize
+    ) / (1024 ** 3)
+    if requested_query_batch_size <= 0 and query_batch_size > 0:
+        chunk_score_matrix_mb = (
+            len(embeddings1) * query_batch_size * np.dtype(np.float32).itemsize
+        ) / (1024 ** 2)
+        print(
+            f">>> [ScaNN] Busca total exigiria ~{full_score_matrix_gb:.2f} GB de scores em float32. "
+            f"Aplicando chunk automático de {query_batch_size} queries "
+            f"(~{chunk_score_matrix_mb:.2f} MB por bloco).",
+            flush=True,
+        )
+
     print(
         f">>> [ScaNN] Configuração de busca | execuções={num_execucoes} "
+        f"| builder_mode={builder_mode} "
         f"| query_batch_size={query_batch_size if query_batch_size > 0 else 'all'} "
         f"| search_kwargs={search_kwargs}",
         flush=True,
@@ -218,8 +277,8 @@ def merge_knn_scann(
                 f">>> [ScaNN] Processando queries em chunks de {query_batch_size}...",
                 flush=True,
             )
-            result_indices = []
-            result_distances = []
+            I = None
+            D = None
 
             for start_idx in range(0, len(embeddings2), query_batch_size):
                 end_idx = min(start_idx + query_batch_size, len(embeddings2))
@@ -231,11 +290,11 @@ def merge_knn_scann(
                     embeddings2[start_idx:end_idx],
                     **search_kwargs,
                 )
-                result_indices.append(chunk_I)
-                result_distances.append(chunk_D)
-
-            I = np.vstack(result_indices)
-            D = np.vstack(result_distances)
+                if I is None:
+                    I = np.empty((len(embeddings2), chunk_I.shape[1]), dtype=chunk_I.dtype)
+                    D = np.empty((len(embeddings2), chunk_D.shape[1]), dtype=chunk_D.dtype)
+                I[start_idx:end_idx] = chunk_I
+                D[start_idx:end_idx] = chunk_D
         else:
             I, D = searcher.search_batched(
                 embeddings2,
