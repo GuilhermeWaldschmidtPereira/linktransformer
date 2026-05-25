@@ -158,6 +158,10 @@ Desativar ambiente:
 deactivate
 ```
 
+Observação: a execução principal atual roda via Podman. Esse ambiente
+virtual continua útil para desenvolvimento local, testes manuais e uso
+fora do container.
+
 ------------------------------------------------------------------------
 
 ## Ambiente ScaNN (venv_scann)
@@ -195,21 +199,40 @@ principal:
 
 ``` bash
 chmod +x main.sh
+chmod +x main_scann.sh
 ```
 
 ------------------------------------------------------------------------
 
-# Execução do Pipeline
+# Execução do LinkTransformer sem ScaNN
 
-Após a criação dos ambientes virtuais e instalação das dependências,
-execute o pipeline com:
+Após instalar o Podman, execute o pipeline principal com:
 
 ``` bash
 ./main.sh
 ```
 
+Esse comando constrói automaticamente a imagem
+`localhost/projeto-mestrado-linktransformer:latest`, caso ela ainda não
+exista, e executa somente os métodos do LinkTransformer que não dependem
+do ScaNN. O diretório do projeto é montado em `/workspace`, então os
+arquivos de entrada, embeddings e resultados continuam sendo lidos e
+gravados no workspace local.
+
+Para forçar outro nome de imagem:
+
+``` bash
+LINKTRANSFORMER_IMAGE=meu-linktransformer:latest ./main.sh
+```
+
+Para executar apenas o ScaNN, use:
+
+``` bash
+./main_scann.sh
+```
+
 O script `main.sh` executará automaticamente os experimentos definidos
-no projeto.
+para o ambiente principal, sem ativar o ambiente `venv_scann`.
 
 ------------------------------------------------------------------------
 
