@@ -23,7 +23,7 @@ import time
 
 PATH_RESULTADOS = os.path.join(os.path.dirname(__file__), "resultados")
 
-NUM_EXECUCOES_BUSCA = 5
+NUM_EXECUCOES_BUSCA = 1
 
 if not os.path.exists(PATH_RESULTADOS):
     os.makedirs(PATH_RESULTADOS)

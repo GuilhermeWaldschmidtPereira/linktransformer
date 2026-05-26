@@ -25,8 +25,8 @@ from linktransformer.infer_main import (  # noqa: E402
 MODELOS_A_UTILIZAR: List[str] = [
     "sentence-transformers/all-MiniLM-L6-v2",
     "sentence-transformers/all-mpnet-base-v2",
-    "intfloat/multilingual-e5-large",
-    "neuralmind/bert-large-portuguese-cased",
+    # "intfloat/multilingual-e5-large",
+    # "neuralmind/bert-large-portuguese-cased",
 ]
 
 
