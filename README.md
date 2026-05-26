@@ -15,6 +15,12 @@ execução automatizada de experimentos com diferentes modelos de
 
     .
     ├── main.sh
+    ├── main_baseline.sh
+    ├── main_svs.sh
+    ├── main_nmslib.sh
+    ├── main_hnsw_julia.sh
+    ├── main_scann.sh
+    ├── main_common.sh
     ├── requirements.txt
     ├── requirements_scann.txt
     ├── run_linktransformer/
@@ -26,7 +32,9 @@ Descrição dos principais componentes:
 
   Diretório                  Descrição
   -------------------------- ------------------------------------------------------
-  `main.sh`                  Script principal responsável por executar o pipeline
+  `main.sh`                  Script principal responsável por executar todas as indexações
+  `main_*.sh`                Scripts individuais para executar cada indexação separadamente
+  `main_common.sh`           Helper compartilhado usado pelos scripts shell
   `requirements.txt`         Dependências do ambiente principal
   `requirements_scann.txt`   Dependências específicas do método ScaNN
   `run_linktransformer`      Scripts de execução do processo de matching
@@ -44,6 +52,7 @@ softwares instalados:
 -   Python 3.11.2
 -   pip
 -   venv
+-   Podman
 
 Em sistemas Linux (Ubuntu/Debian):
 
@@ -195,16 +204,20 @@ deactivate
 # Permissão de Execução
 
 Antes de executar o pipeline, conceda permissão de execução ao script
-principal:
+principal e aos scripts individuais:
 
 ``` bash
 chmod +x main.sh
+chmod +x main_baseline.sh
+chmod +x main_svs.sh
+chmod +x main_nmslib.sh
+chmod +x main_hnsw_julia.sh
 chmod +x main_scann.sh
 ```
 
 ------------------------------------------------------------------------
 
-# Execução do LinkTransformer sem ScaNN
+# Execução dos Experimentos
 
 Após instalar o Podman, execute o pipeline principal com:
 
@@ -212,12 +225,18 @@ Após instalar o Podman, execute o pipeline principal com:
 ./main.sh
 ```
 
-Esse comando constrói automaticamente a imagem
-`localhost/projeto-mestrado-linktransformer:latest`, caso ela ainda não
-exista, e executa somente os métodos do LinkTransformer que não dependem
-do ScaNN. O diretório do projeto é montado em `/workspace`, então os
-arquivos de entrada, embeddings e resultados continuam sendo lidos e
-gravados no workspace local.
+Esse comando executa todas as indexações disponíveis em sequência:
+
+- `baseline`
+- `svs`
+- `nmslib`
+- `hnsw_julia`
+- `scann`
+
+O diretório do projeto é montado em `/workspace`, então os arquivos de
+entrada, embeddings e resultados continuam sendo lidos e gravados no
+workspace local. O arquivo `resultados.csv` é reiniciado no começo da
+execução completa.
 
 Para forçar outro nome de imagem:
 
@@ -225,14 +244,23 @@ Para forçar outro nome de imagem:
 LINKTRANSFORMER_IMAGE=meu-linktransformer:latest ./main.sh
 ```
 
-Para executar apenas o ScaNN, use:
+Para trocar também a imagem dedicada do ScaNN:
 
 ``` bash
+LINKTRANSFORMER_IMAGE=meu-linktransformer:latest SCANN_IMAGE=meu-scann:latest ./main.sh
+```
+
+Para executar uma indexação específica, use o script correspondente:
+
+``` bash
+./main_baseline.sh
+./main_svs.sh
+./main_nmslib.sh
+./main_hnsw_julia.sh
 ./main_scann.sh
 ```
 
-O script `main.sh` executará automaticamente os experimentos definidos
-para o ambiente principal, sem ativar o ambiente `venv_scann`.
+Cada script individual também reinicia o `resultados.csv` por padrão.
 
 ------------------------------------------------------------------------
 

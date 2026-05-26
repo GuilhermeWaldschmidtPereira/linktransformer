@@ -29,6 +29,8 @@ MODELOS_A_UTILIZAR: List[str] = [
     # "neuralmind/bert-large-portuguese-cased",
 ]
 
+METODOS_DISPONIVEIS = ("baseline", "svs")
+
 
 def safe_model_name(modelo: str) -> str:
     safe_model = str(modelo).replace(os.sep, "_")
@@ -51,6 +53,31 @@ def assert_embeddings_exist(modelo: str) -> None:
             "Execute primeiro o script isolado de embeddings.\n"
             f"{missing}"
         )
+
+
+def resolve_metodos() -> List[str]:
+    raw_methods = os.environ.get("LINKTRANSFORMER_METHODS", ",".join(METODOS_DISPONIVEIS))
+    methods = []
+
+    for item in raw_methods.split(","):
+        method = item.strip().lower()
+        if not method:
+            continue
+        if method not in METODOS_DISPONIVEIS:
+            raise ValueError(
+                "Método inválido em LINKTRANSFORMER_METHODS: "
+                f"{method}. Opções válidas: {', '.join(METODOS_DISPONIVEIS)}"
+            )
+        if method not in methods:
+            methods.append(method)
+
+    if not methods:
+        raise ValueError(
+            "Nenhum método foi selecionado em LINKTRANSFORMER_METHODS. "
+            f"Use uma combinação de: {', '.join(METODOS_DISPONIVEIS)}"
+        )
+
+    return methods
 
 
 def load_input_data():
@@ -111,6 +138,8 @@ def prepare_dataframes(df_base: pd.DataFrame, df_query: pd.DataFrame):
 def main() -> None:
     print(f">>> Script em execução: {__file__}", flush=True)
     print(f">>> Modelos configurados: {MODELOS_A_UTILIZAR}", flush=True)
+    metodos = resolve_metodos()
+    print(f">>> Métodos selecionados: {metodos}", flush=True)
 
     try:
         df_base, df_query = load_input_data()
@@ -125,13 +154,18 @@ def main() -> None:
             df1, df2 = prepare_dataframes(df_base, df_query)
 
             for k in ks:
-                print(f">>> Rodando LinkTransformer sem ScaNN | modelo={modelo} | k={k}")
                 print(
                     f">>> Tamanhos dos dataframes: df1={len(df1)} linhas | df2={len(df2)} linhas",
                     flush=True,
                 )
-                merge_knn(k, df1, df2, suffixes, modelo)
-                merge_knn2(k, df1, df2, suffixes, modelo)
+
+                if "baseline" in metodos:
+                    print(f">>> Rodando baseline | modelo={modelo} | k={k}", flush=True)
+                    merge_knn(k, df1, df2, suffixes, modelo)
+
+                if "svs" in metodos:
+                    print(f">>> Rodando SVS | modelo={modelo} | k={k}", flush=True)
+                    merge_knn2(k, df1, df2, suffixes, modelo)
     except Exception as exc:
         print(f">>> ERRO em main_linktransformer.py: {type(exc).__name__}: {exc}", flush=True)
         traceback.print_exc(file=sys.stdout)

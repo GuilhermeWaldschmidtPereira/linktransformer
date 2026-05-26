@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_SCANN="$HOME/venv_scann"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/main_common.sh"
 
-echo "Venv ScaNN: ${VENV_SCANN}"
-echo ">>> Ativando venv_scann..."
-source "${VENV_SCANN}/bin/activate"
+lt_require_podman
+lt_prepare_results_file
 
-echo ">>> Rodando ScaNN..."
-python "${PROJECT_ROOT}/run_linktransformer/main_scann.py"
+echo ">>> Rodando ScaNN via Podman..."
+lt_run_scann_container \
+  python /workspace/run_linktransformer/main_scann.py
 
 echo ">>> FIM do experimento ScaNN."
