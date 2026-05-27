@@ -1,0 +1,16 @@
+FROM docker.io/library/python:3.11-bookworm
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/opt/huggingface \
+    TRANSFORMERS_CACHE=/opt/huggingface
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-embeddings.txt ./
+
+RUN pip install --upgrade pip setuptools wheel && pip install -r requirements-embeddings.txt

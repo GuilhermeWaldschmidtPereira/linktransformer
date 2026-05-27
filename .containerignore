@@ -1,5 +1,24 @@
 .git
 .coverage
+.readthedocs.yaml
+.venv_scann
+venv
+venv_scann
+__pycache__
+*.pyc
+data
+logs
+resultados
+benchmarking
+docs
+hnsw_julia
+hnswlib-rs-meu
+my_npy_demo
+tests
+web_apps
+main.ipynb
+df_lm_matched_svs.csv
+resultados.csv
 __pycache__
 *.pyc
 
