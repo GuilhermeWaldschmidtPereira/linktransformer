@@ -16,7 +16,10 @@ DATA_DIR = os.path.join(REPO_ROOT, "data")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from linktransformer.infer_scann import merge_knn_scann  # noqa: E402
+from linktransformer.infer_main import (  # noqa: E402
+    merge_knn,
+    merge_knn2,
+)
 
 
 MODELOS_A_UTILIZAR: List[str] = [
@@ -44,7 +47,7 @@ def assert_embeddings_exist(modelo: str) -> None:
     if missing_paths:
         missing = "\n".join(f"- {path}" for path in missing_paths)
         raise FileNotFoundError(
-            "Embeddings pre-computados não encontrados para o ScaNN. "
+            "Embeddings pre-computados não encontrados. "
             "Execute primeiro o script isolado de embeddings.\n"
             f"{missing}"
         )
@@ -78,10 +81,7 @@ def load_input_data():
             try:
                 print(f">>> Tentando ler {path} com sep='{sep}'...", flush=True)
                 df = pd.read_csv(path, sep=sep)
-                print(
-                    f"    Sucesso! Arquivo lido com sep='{sep}' | linhas={len(df)} | colunas={len(df.columns)}",
-                    flush=True,
-                )
+                print(f"    Sucesso! Arquivo lido com sep='{sep}' | linhas={len(df)} | colunas={len(df.columns)}", flush=True)
                 return df
             except pd.errors.ParserError as e:
                 print(f"    Falha com sep='{sep}': ParserError -> {str(e)[:150]}", flush=True)
@@ -116,7 +116,7 @@ def main() -> None:
         df_base, df_query = load_input_data()
         suffixes = ("_x", "_y")
 
-        # Mantém o comportamento anterior de range(2) com i > 0, que executava apenas k=1.
+        # Mantém o comportamento anterior de main2.py: range(2) com i > 0 executava apenas k=1.
         ks = [1]
 
         for modelo in MODELOS_A_UTILIZAR:
@@ -125,14 +125,15 @@ def main() -> None:
             df1, df2 = prepare_dataframes(df_base, df_query)
 
             for k in ks:
-                print(f">>> Rodando ScaNN | modelo={modelo} | k={k}", flush=True)
+                print(f">>> Rodando LinkTransformer sem ScaNN | modelo={modelo} | k={k}")
                 print(
                     f">>> Tamanhos dos dataframes: df1={len(df1)} linhas | df2={len(df2)} linhas",
                     flush=True,
                 )
-                merge_knn_scann(k, df1, df2, suffixes, modelo)
+                merge_knn(k, df1, df2, suffixes, modelo)
+                merge_knn2(k, df1, df2, suffixes, modelo)
     except Exception as exc:
-        print(f">>> ERRO em main_scann.py: {type(exc).__name__}: {exc}", flush=True)
+        print(f">>> ERRO em main_linktransformer.py: {type(exc).__name__}: {exc}", flush=True)
         traceback.print_exc(file=sys.stdout)
         raise
 

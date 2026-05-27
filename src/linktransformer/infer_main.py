@@ -9,7 +9,6 @@ import pandas as pd
 import svs
 from typing import Union, List, Optional, Tuple,Dict, Any
 from pandas import DataFrame
-from julia import Julia, Main
 
 import psutil
 import os
@@ -21,9 +20,10 @@ from itertools import combinations
 from transformers import TrainingArguments, Trainer
 from linktransformer.main_svs import VamanaIndexer
 import time
-import nmslib
 
 PATH_RESULTADOS = os.path.join(os.path.dirname(__file__), "resultados")
+
+NUM_EXECUCOES_BUSCA = 1
 
 if not os.path.exists(PATH_RESULTADOS):
     os.makedirs(PATH_RESULTADOS)
@@ -50,15 +50,21 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     if os.path.altsep:
         safe_model = safe_model.replace(os.path.altsep, "_")
 
+    print(f">>> [FAISS] Carregando embeddings do modelo: {model}", flush=True)
     embeddings1 = np.load(f"data/embeddings_base_{safe_model}.npy")
     embeddings2 = np.load(f"data/embeddings_query_{safe_model}.npy")
+    print(
+        f">>> [FAISS] Embeddings carregados | base={embeddings1.shape} | query={embeddings2.shape}",
+        flush=True,
+    )
 
     start_index_time = time.time()
     process = psutil.Process(os.getpid())
     mem_before = process.memory_info().rss / (1024 ** 2)  # MB
     
+    print(">>> [FAISS] Criando índice IndexFlatIP...", flush=True)
     index = faiss.IndexFlatIP(embeddings1.shape[1])
-    print("Adding embeddings to index")
+    print(">>> [FAISS] Adicionando embeddings base ao índice...", flush=True)
     index.add(embeddings1)
     
     mem_after = process.memory_info().rss / (1024 ** 2)  # MB
@@ -71,7 +77,7 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     # ================================
     #     BUSCA KNN (FAISS)
     # ================================
-    num_execucoes = 100
+    num_execucoes = NUM_EXECUCOES_BUSCA
     soma_tempo_busca = 0.0
     D = None
     I = None
@@ -83,6 +89,7 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
         "memoria_usada_busca_MB": [],
     }
 
+    print(">>> [FAISS] Iniciando busca KNN...", flush=True)
     for i in range(num_execucoes):
         start_search_time = time.time()
         mem_before = process.memory_info().rss / (1024 ** 2)  # MB
@@ -152,7 +159,7 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
     df_lm_matched.to_csv('teste.csv')
-    matches = (df_lm_matched["setor_esperado_x"] == df_lm_matched["setor_esperado_y"]).sum()
+    matches = (df_lm_matched["setor_censitario_x"] == df_lm_matched["setor_censitario_y"]).sum()
     results_data = {
         "metodo": ["baseline"],
         "modelo_embedding": [model],
@@ -192,8 +199,13 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     if os.path.altsep:
         safe_model = safe_model.replace(os.path.altsep, "_")
 
+    print(f">>> [SVS] Carregando embeddings do modelo: {model}", flush=True)
     embeddings1 = np.load(f"data/embeddings_base_{safe_model}.npy")
     embeddings2 = np.load(f"data/embeddings_query_{safe_model}.npy")
+    print(
+        f">>> [SVS] Embeddings carregados | base={embeddings1.shape} | query={embeddings2.shape}",
+        flush=True,
+    )
 
     # ================================
     #     INDEXAÇÃO (SVS / Vamana)
@@ -208,15 +220,16 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     process = psutil.Process(os.getpid())
     mem_before = process.memory_info().rss / (1024 ** 2)  # MB
     
+    print(">>> [SVS] Construindo índice Vamana...", flush=True)
     index = class_svs.build(
         base_embeddings=embeddings1,        # base indexada (df2)
         reduced_dims=128,                   # projeção para 128D
         graph_max_degree=64,                # M (grau máximo do grafo)
         window_size=128,                    # janela para construção
-        distance=svs.DistanceType.L2,       # métrica L2
+        distance="L2",                      # métrica L2
         num_threads=4,                      # paralelismo
-        primary_kind=svs.LeanVecKind.lvq4,
-        secondary_kind=svs.LeanVecKind.lvq8,
+        primary_kind="lvq4",
+        secondary_kind="lvq8",
     )
 
     
@@ -229,7 +242,7 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     #     BUSCA KNN (SVS)
     # ================================
-    num_execucoes = 100
+    num_execucoes = NUM_EXECUCOES_BUSCA
     soma_tempo_busca = 0.0
     soma_qtde_mem = 0.0
     I = None
@@ -243,6 +256,7 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
 
 
     print("Searching SVS index")
+    print(">>> [SVS] Iniciando busca KNN...", flush=True)
     for i in range(num_execucoes):
         start_search_time = time.time()
         # consultas: embeddings1 (df1) procurando em embeddings2 (df2)
@@ -318,7 +332,7 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-    matches = (df_lm_matched["setor_esperado_x"] == df_lm_matched["setor_esperado_y"]).sum()
+    matches = (df_lm_matched["setor_censitario_x"] == df_lm_matched["setor_censitario_y"]).sum()
     results_data = {
         "metodo": ["svs"],
         "modelo_embedding": [model],
@@ -369,6 +383,8 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     #     INDEXAÇÃO (HNSW em Julia)
     # ================================
     # Importante: ajustar caminho conforme a estrutura do projeto
+    from julia import Main
+
     Main.include("hnsw_julia/hnsw_wrapper.jl")
 
     # Indexar a BASE = df2 / embeddings2, igual ao padrão FAISS/SVS/NMSLIB
@@ -388,7 +404,7 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     #     BUSCA KNN
     # ================================
     soma_tempo_busca = 0.0
-    num_execucoes = 100
+    num_execucoes = NUM_EXECUCOES_BUSCA
     I = None
     D = None
     soma_memoria_usada = 0.0
@@ -474,7 +490,7 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-    matches = (df_lm_matched["setor_esperado_x"] == df_lm_matched["setor_esperado_y"]).sum()
+    matches = (df_lm_matched["setor_censitario_x"] == df_lm_matched["setor_censitario_y"]).sum()
     results_data = {
         "metodo": ["hnsw_julia"],
         "modelo_embedding": [model],
@@ -507,6 +523,7 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     - Faz merge fuzzy df1 x df2
     - Salva tempos em resultados.csv com metodo = "nmslib_hnsw"
     """
+    import nmslib
 
     # ================================
     #     CARREGAR EMBEDDINGS
@@ -556,7 +573,7 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     #     BUSCA KNN (NMSLIB)
     # ================================
-    num_execucoes = 100
+    num_execucoes = NUM_EXECUCOES_BUSCA
     soma_tempo_busca = 0.0
     neighbors = None
     distances = None
@@ -648,7 +665,7 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     results_file = "resultados.csv"
     total_time = index_time + avg_search_time
-    matches = (df_lm_matched["setor_esperado_x"] == df_lm_matched["setor_esperado_y"]).sum()
+    matches = (df_lm_matched["setor_censitario_x"] == df_lm_matched["setor_censitario_y"]).sum()
     results_data = {
         "metodo": ["NMSLIB"],
         "modelo_embedding": [model],
@@ -716,7 +733,7 @@ def merge_knn_scann(k, df1, df2, suffixes) -> DataFrame:
     # ================================
     #     BUSCA KNN (ScaNN)
     # ================================
-    num_execucoes = 100
+    num_execucoes = NUM_EXECUCOES_BUSCA
     soma_tempo_busca = 0.0
     I = None
     D = None
