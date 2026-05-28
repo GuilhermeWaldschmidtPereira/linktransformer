@@ -105,3 +105,30 @@ def test_merge_partitions_merges_saved_arrays_to_disk(tmp_path):
         merged,
         np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=np.float32),
     )
+
+
+def test_merge_partitions_can_delete_inputs_after_write(tmp_path):
+    partition_dir = tmp_path / "model_a"
+    partition_dir.mkdir()
+
+    first_path = partition_dir / "partition_000000_query.npy"
+    second_path = partition_dir / "partition_000001_query.npy"
+    np.save(first_path, np.array([[1.0, 2.0]], dtype=np.float32))
+    np.save(second_path, np.array([[3.0, 4.0]], dtype=np.float32))
+
+    output_path = tmp_path / "embeddings_query_model_a.npy"
+    num_partitions, total_rows = MERGE_PARTITIONS.merge_partitions(
+        partition_dir=partition_dir,
+        side="query",
+        output_path=str(output_path),
+        verbose=False,
+        delete_partitions=True,
+    )
+
+    merged = np.load(output_path)
+
+    assert num_partitions == 2
+    assert total_rows == 2
+    assert merged.shape == (2, 2)
+    assert not first_path.exists()
+    assert not second_path.exists()

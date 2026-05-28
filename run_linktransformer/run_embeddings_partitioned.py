@@ -98,6 +98,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Se ativado, mescla as partições em um único arquivo ao final.",
     )
+    parser.add_argument(
+        "--keep-partitions-after-merge",
+        action="store_true",
+        help=(
+            "Mantém os arquivos de partição após escrever no arquivo mesclado. "
+            "Por padrão, quando --merge-partitions está ativo, as partições são removidas após o merge."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -557,9 +565,15 @@ def process_base_partitioned(
                     embeddings_partition=embeddings_partition,
                 )
                 merged_memmap.flush()
+                if not args.keep_partitions_after_merge:
+                    os.remove(partition_path)
+                    print(f"    Partição removida após merge: {partition_path}", flush=True)
 
             partition_elapsed = time.perf_counter() - partition_start_time
-            print(f"    Salvo: {partition_path} | {elapsed_summary(partition_elapsed)}", flush=True)
+            if args.merge_partitions and not args.keep_partitions_after_merge:
+                print(f"    Merge concluído para partição {partition_idx}: {elapsed_summary(partition_elapsed)}", flush=True)
+            else:
+                print(f"    Salvo: {partition_path} | {elapsed_summary(partition_elapsed)}", flush=True)
 
             del embeddings_partition
             del df_partition
@@ -684,9 +698,15 @@ def process_both_partitioned(
                     embeddings_partition=embeddings_partition,
                 )
                 merged_memmap_base.flush()
+                if not args.keep_partitions_after_merge:
+                    os.remove(partition_path)
+                    print(f"      Partição removida após merge: {partition_path}", flush=True)
 
             partition_elapsed = time.perf_counter() - partition_start_time
-            print(f"      Salvo: {partition_path} | {elapsed_summary(partition_elapsed)}", flush=True)
+            if args.merge_partitions and not args.keep_partitions_after_merge:
+                print(f"      Merge concluído para partição base {partition_idx}: {elapsed_summary(partition_elapsed)}", flush=True)
+            else:
+                print(f"      Salvo: {partition_path} | {elapsed_summary(partition_elapsed)}", flush=True)
 
             del embeddings_partition
             del df_partition
@@ -733,9 +753,15 @@ def process_both_partitioned(
                     embeddings_partition=embeddings_partition,
                 )
                 merged_memmap_query.flush()
+                if not args.keep_partitions_after_merge:
+                    os.remove(partition_path)
+                    print(f"      Partição removida após merge: {partition_path}", flush=True)
 
             partition_elapsed = time.perf_counter() - partition_start_time
-            print(f"      Salvo: {partition_path} | {elapsed_summary(partition_elapsed)}", flush=True)
+            if args.merge_partitions and not args.keep_partitions_after_merge:
+                print(f"      Merge concluído para partição query {partition_idx}: {elapsed_summary(partition_elapsed)}", flush=True)
+            else:
+                print(f"      Salvo: {partition_path} | {elapsed_summary(partition_elapsed)}", flush=True)
 
             del embeddings_partition
             del df_partition

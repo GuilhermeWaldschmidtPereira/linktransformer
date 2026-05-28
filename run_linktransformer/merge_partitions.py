@@ -38,6 +38,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Mostrar informações detalhadas",
     )
+    parser.add_argument(
+        "--delete-partitions",
+        action="store_true",
+        help="Remove cada partição assim que ela for escrita no arquivo mesclado.",
+    )
     return parser.parse_args()
 
 
@@ -66,6 +71,7 @@ def merge_partitions(
     side: str,
     output_path: str,
     verbose: bool = False,
+    delete_partitions: bool = False,
 ) -> Tuple[int, int]:
     """
     Mescla as partições em um único arquivo.
@@ -87,8 +93,7 @@ def merge_partitions(
         if verbose:
             print(f"  [{i + 1}/{len(partitions)}] Carregando {partition_file.name}...", end="", flush=True)
 
-        arr = np.load(partition_file)
-        arr = np.asarray(arr, dtype=np.float32)
+        arr = np.load(partition_file, mmap_mode="r")
         rows = arr.shape[0]
 
         if merged_memmap is None:
@@ -104,10 +109,18 @@ def merge_partitions(
             )
 
         merged_memmap[write_offset:write_offset + rows] = arr
+        merged_memmap.flush()
         write_offset += rows
 
         if verbose:
             print(f" shape={arr.shape}")
+
+        del arr
+
+        if delete_partitions:
+            partition_file.unlink()
+            if verbose:
+                print(f"    Removida após merge: {partition_file}")
 
     if merged_memmap is not None:
         merged_memmap.flush()
@@ -153,6 +166,7 @@ def main() -> None:
         args.side,
         output_path,
         verbose=args.verbose,
+        delete_partitions=args.delete_partitions,
     )
 
     print(
