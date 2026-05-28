@@ -19,12 +19,12 @@ mkdir -p "${TEST_DIR}"
 
 echo ">>> Gerando CSV de teste com 350 linhas (3 partições de 100 linhas)..."
 cat > "${TEST_DIR}/base_test.csv" << 'EOF'
-uf,municipio,logradouro,numero,complemento,localidade,setor_censitario
-SP,São Paulo,Rua A,100,,Centro,001
-SP,São Paulo,Rua B,200,,Vila,002
-MG,Belo Horizonte,Avenida C,300,,Zona,003
-RJ,Rio de Janeiro,Rua D,400,,Praia,004
-BA,Salvador,Rua E,500,,Barra,005
+id_municipio,uf,municipio,logradouro,numero,complemento,localidade,setor_censitario
+3550308,SP,São Paulo,Rua A,100,,Centro,001
+3550308,SP,São Paulo,Rua B,200,,Vila,002
+3106200,MG,Belo Horizonte,Avenida C,300,,Zona,003
+3304557,RJ,Rio de Janeiro,Rua D,400,,Praia,004
+2927408,BA,Salvador,Rua E,500,,Barra,005
 EOF
 
 # Repetir para ter 350 linhas
@@ -38,12 +38,13 @@ python3 << 'PYTHON_SCRIPT'
 import csv
 
 data = [
-    ["uf", "municipio", "logradouro", "numero", "complemento", "localidade", "setor_censitario"],
+    ["id_municipio", "uf", "municipio", "logradouro", "numero", "complemento", "localidade", "setor_censitario"],
 ]
 
 # Gerar 350 linhas de dados
 for i in range(350):
     data.append([
+        "3550308" if i < 200 else "3304557",
         "SP", 
         "São Paulo",
         f"Rua Test {i}",

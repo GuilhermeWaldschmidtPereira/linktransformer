@@ -25,12 +25,17 @@ sys.path.insert(0, THIS_DIR)
 
 from run_embeddings import (
     ColumnSpec,
+    build_municipality_manifest_entry,
     build_embeddings,
+    candidate_csv_separators,
     current_memory_mb,
+    dataframe_has_plausible_columns,
     elapsed_summary,
+    load_dataframe,
     normalize_column_spec,
+    process_side_by_municipality,
     resolve_columns,
-    resolve_csv_separator,
+    resolve_municipality_columns,
     resolve_single_side_columns,
     safe_model_name,
 )
@@ -66,6 +71,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--on", nargs="+")
     parser.add_argument("--left-on", nargs="+")
     parser.add_argument("--right-on", nargs="+")
+    parser.add_argument(
+        "--municipality-column",
+        default=None,
+        help="Nome da coluna de ID do município usada para agrupar base e query.",
+    )
+    parser.add_argument(
+        "--base-municipality-column",
+        default=None,
+        help="Nome da coluna de ID do município na base. Sobrescreve --municipality-column.",
+    )
+    parser.add_argument(
+        "--query-municipality-column",
+        default=None,
+        help="Nome da coluna de ID do município na query. Sobrescreve --municipality-column.",
+    )
     parser.add_argument("--openai-key", default=os.getenv("OPENAI_API_KEY"))
     parser.add_argument(
         "--csv-encoding",
@@ -79,6 +99,201 @@ def parse_args() -> argparse.Namespace:
         help="Se ativado, mescla as partições em um único arquivo ao final.",
     )
     return parser.parse_args()
+
+
+def process_base_by_municipality(
+    args: argparse.Namespace,
+    models: List[str],
+    manifest: List[dict],
+) -> None:
+    """Processa a base agrupando pelo ID do município antes de gerar embeddings."""
+    print(">>> Preparando base para processamento por município...", flush=True)
+    df_base = load_dataframe(args.base_path, csv_encoding=args.csv_encoding)
+    base_columns = resolve_single_side_columns(args.left_on, normalize_column_spec(args.on), "left")
+    base_municipality_column, _ = resolve_municipality_columns(args, df_base=df_base)
+    multiple_models = len(models) > 1
+
+    for model_name in models:
+        print(f"\n>>> Processando modelo: {model_name}", flush=True)
+        model_start_time = time.perf_counter()
+        model_memory_start_mb = current_memory_mb()
+
+        base_files = process_side_by_municipality(
+            df=df_base,
+            columns=base_columns,
+            municipality_column=base_municipality_column,
+            output_dir=args.output_dir,
+            side="base",
+            model_name=model_name,
+            batch_size=args.batch_size,
+            openai_key=args.openai_key,
+            multiple_models=multiple_models,
+        )
+
+        elapsed_seconds = time.perf_counter() - model_start_time
+        model_memory_end_mb = current_memory_mb()
+        model_memory_peak_mb = max(model_memory_start_mb, model_memory_end_mb)
+
+        print(f"Tempo total do modelo {model_name}: {elapsed_summary(elapsed_seconds)}", flush=True)
+        print(
+            f"Memória total do modelo {model_name}: "
+            f"início {model_memory_start_mb:.2f} MB | fim {model_memory_end_mb:.2f} MB | "
+            f"peak aprox. {model_memory_peak_mb:.2f} MB | delta {model_memory_end_mb - model_memory_start_mb:.2f} MB",
+            flush=True,
+        )
+
+        manifest.append(
+            {
+                **build_municipality_manifest_entry(
+                    model_name,
+                    "base",
+                    base_municipality_column=base_municipality_column,
+                    base_files=base_files,
+                ),
+                "elapsed_seconds": elapsed_seconds,
+                "elapsed_minutes": elapsed_seconds / 60.0,
+                "memory_start_mb": model_memory_start_mb,
+                "memory_end_mb": model_memory_end_mb,
+                "memory_peak_mb": model_memory_peak_mb,
+                "memory_delta_mb": model_memory_end_mb - model_memory_start_mb,
+            }
+        )
+
+
+def process_query_by_municipality(
+    args: argparse.Namespace,
+    models: List[str],
+    manifest: List[dict],
+) -> None:
+    """Processa a query agrupando pelo ID do município antes de gerar embeddings."""
+    print(">>> Preparando query para processamento por município...", flush=True)
+    df_query = load_dataframe(args.query_path, csv_encoding=args.csv_encoding)
+    query_columns = resolve_single_side_columns(args.right_on, normalize_column_spec(args.on), "right")
+    _, query_municipality_column = resolve_municipality_columns(args, df_query=df_query)
+    multiple_models = len(models) > 1
+
+    for model_name in models:
+        print(f"\n>>> Processando modelo: {model_name}", flush=True)
+        model_start_time = time.perf_counter()
+        model_memory_start_mb = current_memory_mb()
+
+        query_files = process_side_by_municipality(
+            df=df_query,
+            columns=query_columns,
+            municipality_column=query_municipality_column,
+            output_dir=args.output_dir,
+            side="query",
+            model_name=model_name,
+            batch_size=args.batch_size,
+            openai_key=args.openai_key,
+            multiple_models=multiple_models,
+        )
+
+        elapsed_seconds = time.perf_counter() - model_start_time
+        model_memory_end_mb = current_memory_mb()
+        model_memory_peak_mb = max(model_memory_start_mb, model_memory_end_mb)
+
+        print(f"Tempo total do modelo {model_name}: {elapsed_summary(elapsed_seconds)}", flush=True)
+        print(
+            f"Memória total do modelo {model_name}: "
+            f"início {model_memory_start_mb:.2f} MB | fim {model_memory_end_mb:.2f} MB | "
+            f"peak aprox. {model_memory_peak_mb:.2f} MB | delta {model_memory_end_mb - model_memory_start_mb:.2f} MB",
+            flush=True,
+        )
+
+        manifest.append(
+            {
+                **build_municipality_manifest_entry(
+                    model_name,
+                    "query",
+                    query_municipality_column=query_municipality_column,
+                    query_files=query_files,
+                ),
+                "elapsed_seconds": elapsed_seconds,
+                "elapsed_minutes": elapsed_seconds / 60.0,
+                "memory_start_mb": model_memory_start_mb,
+                "memory_end_mb": model_memory_end_mb,
+                "memory_peak_mb": model_memory_peak_mb,
+                "memory_delta_mb": model_memory_end_mb - model_memory_start_mb,
+            }
+        )
+
+
+def process_both_by_municipality(
+    args: argparse.Namespace,
+    models: List[str],
+    manifest: List[dict],
+) -> None:
+    """Processa base e query agrupando pelo ID do município antes de gerar embeddings."""
+    print(">>> Preparando base e query para processamento por município...", flush=True)
+    df_base = load_dataframe(args.base_path, csv_encoding=args.csv_encoding)
+    df_query = load_dataframe(args.query_path, csv_encoding=args.csv_encoding)
+    left_on, right_on = resolve_columns(args, df_base, df_query)
+    base_municipality_column, query_municipality_column = resolve_municipality_columns(
+        args,
+        df_base=df_base,
+        df_query=df_query,
+    )
+    multiple_models = len(models) > 1
+
+    for model_name in models:
+        print(f"\n>>> Processando modelo: {model_name}", flush=True)
+        model_start_time = time.perf_counter()
+        model_memory_start_mb = current_memory_mb()
+
+        base_files = process_side_by_municipality(
+            df=df_base,
+            columns=left_on,
+            municipality_column=base_municipality_column,
+            output_dir=args.output_dir,
+            side="base",
+            model_name=model_name,
+            batch_size=args.batch_size,
+            openai_key=args.openai_key,
+            multiple_models=multiple_models,
+        )
+        query_files = process_side_by_municipality(
+            df=df_query,
+            columns=right_on,
+            municipality_column=query_municipality_column,
+            output_dir=args.output_dir,
+            side="query",
+            model_name=model_name,
+            batch_size=args.batch_size,
+            openai_key=args.openai_key,
+            multiple_models=multiple_models,
+        )
+
+        elapsed_seconds = time.perf_counter() - model_start_time
+        model_memory_end_mb = current_memory_mb()
+        model_memory_peak_mb = max(model_memory_start_mb, model_memory_end_mb)
+
+        print(f"Tempo total do modelo {model_name}: {elapsed_summary(elapsed_seconds)}", flush=True)
+        print(
+            f"Memória total do modelo {model_name}: "
+            f"início {model_memory_start_mb:.2f} MB | fim {model_memory_end_mb:.2f} MB | "
+            f"peak aprox. {model_memory_peak_mb:.2f} MB | delta {model_memory_end_mb - model_memory_start_mb:.2f} MB",
+            flush=True,
+        )
+
+        manifest.append(
+            {
+                **build_municipality_manifest_entry(
+                    model_name,
+                    "both",
+                    base_municipality_column=base_municipality_column,
+                    query_municipality_column=query_municipality_column,
+                    base_files=base_files,
+                    query_files=query_files,
+                ),
+                "elapsed_seconds": elapsed_seconds,
+                "elapsed_minutes": elapsed_seconds / 60.0,
+                "memory_start_mb": model_memory_start_mb,
+                "memory_end_mb": model_memory_end_mb,
+                "memory_peak_mb": model_memory_peak_mb,
+                "memory_delta_mb": model_memory_end_mb - model_memory_start_mb,
+            }
+        )
 
 
 def get_partition_output_dir(base_output_dir: str, model_name: str) -> str:
@@ -111,17 +326,39 @@ def load_dataframe_columns(path: str, csv_encoding: Optional[str] = None) -> pd.
     """Carrega apenas o cabeçalho/metadata para resolver colunas sem materializar tudo em memória."""
     file_format = infer_file_format(path)
     if file_format == "csv":
-        sep = resolve_csv_separator(path)
+        candidate_separators = candidate_csv_separators(path)
+        first_implausible: Optional[pd.DataFrame] = None
         if csv_encoding:
-            return pd.read_csv(path, encoding=csv_encoding, sep=sep, nrows=0)
+            for sep in candidate_separators:
+                try:
+                    df = pd.read_csv(path, encoding=csv_encoding, sep=sep, nrows=0)
+                except pd.errors.ParserError:
+                    continue
+                if dataframe_has_plausible_columns(df):
+                    return df
+                if first_implausible is None:
+                    first_implausible = df
+            if first_implausible is not None:
+                return first_implausible
 
         candidate_encodings = ["utf-8", "utf-8-sig", "latin1", "cp1252"]
         last_error: Optional[UnicodeDecodeError] = None
         for candidate in candidate_encodings:
-            try:
-                return pd.read_csv(path, encoding=candidate, sep=sep, nrows=0)
-            except UnicodeDecodeError as exc:
-                last_error = exc
+            for sep in candidate_separators:
+                try:
+                    df = pd.read_csv(path, encoding=candidate, sep=sep, nrows=0)
+                except UnicodeDecodeError as exc:
+                    last_error = exc
+                    break
+                except pd.errors.ParserError:
+                    continue
+                if dataframe_has_plausible_columns(df):
+                    return df
+                if first_implausible is None:
+                    first_implausible = df
+
+        if first_implausible is not None:
+            return first_implausible
 
         raise UnicodeDecodeError(
             last_error.encoding if last_error else "utf-8",
@@ -156,24 +393,55 @@ def iter_dataframe_partitions(
     file_format = infer_file_format(path)
 
     if file_format == "csv":
-        sep = resolve_csv_separator(path)
+        candidate_separators = candidate_csv_separators(path)
+        first_implausible_reader = None
         if csv_encoding:
-            yield from pd.read_csv(path, encoding=csv_encoding, sep=sep, chunksize=partition_size)
-            return
+            for sep in candidate_separators:
+                try:
+                    reader = pd.read_csv(path, encoding=csv_encoding, sep=sep, chunksize=partition_size)
+                    iterator = iter(reader)
+                    first_chunk = next(iterator)
+                except StopIteration:
+                    return
+                except pd.errors.ParserError:
+                    continue
+                if dataframe_has_plausible_columns(first_chunk):
+                    yield first_chunk
+                    yield from iterator
+                    return
+                if first_implausible_reader is None:
+                    first_implausible_reader = (first_chunk, iterator)
+            if first_implausible_reader is not None:
+                first_chunk, iterator = first_implausible_reader
+                yield first_chunk
+                yield from iterator
+                return
 
         candidate_encodings = ["utf-8", "utf-8-sig", "latin1", "cp1252"]
         last_error: Optional[UnicodeDecodeError] = None
         for candidate in candidate_encodings:
-            try:
-                reader = pd.read_csv(path, encoding=candidate, sep=sep, chunksize=partition_size)
-                iterator = iter(reader)
-                first_chunk = next(iterator)
-            except StopIteration:
-                return
-            except UnicodeDecodeError as exc:
-                last_error = exc
-                continue
+            for sep in candidate_separators:
+                try:
+                    reader = pd.read_csv(path, encoding=candidate, sep=sep, chunksize=partition_size)
+                    iterator = iter(reader)
+                    first_chunk = next(iterator)
+                except StopIteration:
+                    return
+                except UnicodeDecodeError as exc:
+                    last_error = exc
+                    break
+                except pd.errors.ParserError:
+                    continue
 
+                if dataframe_has_plausible_columns(first_chunk):
+                    yield first_chunk
+                    yield from iterator
+                    return
+                if first_implausible_reader is None:
+                    first_implausible_reader = (first_chunk, iterator)
+
+        if first_implausible_reader is not None:
+            first_chunk, iterator = first_implausible_reader
             yield first_chunk
             yield from iterator
             return
@@ -523,19 +791,22 @@ def main() -> None:
     models = args.models or DEFAULT_MODELS
 
     os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(os.path.join(args.output_dir, "base"), exist_ok=True)
+    os.makedirs(os.path.join(args.output_dir, "query"), exist_ok=True)
     manifest = []
 
-    print(f">>> Partições de {args.partition_size:,} linhas", flush=True)
+    print(">>> Processamento por município habilitado", flush=True)
+    print(f">>> Partições de {args.partition_size:,} linhas (usadas apenas no modo legado)", flush=True)
     print(f">>> Output dir: {args.output_dir}", flush=True)
     print(f">>> Modelos: {', '.join(models)}", flush=True)
-    print(f">>> Merge partitions: {args.merge_partitions}", flush=True)
+    print(f">>> Merge partitions: {args.merge_partitions} (ignorado no processamento por município)", flush=True)
 
     if args.mode == "both":
-        process_both_partitioned(args, models, manifest)
+        process_both_by_municipality(args, models, manifest)
     elif args.mode == "base":
-        process_base_partitioned(args, models, manifest)
+        process_base_by_municipality(args, models, manifest)
     else:
-        raise NotImplementedError("Modo 'query' ainda não implementado para particionamento")
+        process_query_by_municipality(args, models, manifest)
 
     if args.manifest_path:
         manifest_dir = os.path.dirname(args.manifest_path)
