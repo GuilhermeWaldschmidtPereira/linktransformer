@@ -30,6 +30,24 @@ if not os.path.exists(PATH_RESULTADOS):
 
 NAME_DF_RESULTADOS_GERAL = "resultados_geral.csv"
 PATH_RESULTADOS_GERAL = os.path.join(PATH_RESULTADOS, NAME_DF_RESULTADOS_GERAL)
+PATH_RESULTADOS_POR_MUNICIPIO_DIR = "resultados_por_municipio"
+PATH_RESULTADOS_POR_MUNICIPIO = "resultados_por_municipio.csv"
+
+RESULTADOS_POR_MUNICIPIO_COLUMNS = [
+    "metodo",
+    "modelo_embedding",
+    "id_municipio",
+    "index_time",
+    "search_time",
+    "total_time",
+    "num_rows_df1",
+    "num_rows_df2",
+    "k",
+    "k_efetivo",
+    "mem_used_indexation_MB",
+    "avg_mem_used_search_MB",
+    "matches",
+]
 
 df_geral = pd.DataFrame(columns=[
     "execucao",
@@ -41,14 +59,76 @@ df_geral = pd.DataFrame(columns=[
 
 df_geral.to_csv(PATH_RESULTADOS_GERAL, index=False)
 
+
+def safe_model_name(model) -> str:
+    safe_model = str(model).replace(os.sep, "_")
+    if os.path.altsep:
+        safe_model = safe_model.replace(os.path.altsep, "_")
+    return safe_model
+
+
+def get_municipio_column(df1: DataFrame, df2: DataFrame) -> str:
+    for column in ("id_municipio", "municipio"):
+        if column in df1.columns and column in df2.columns:
+            return column
+    raise ValueError(
+        "Não encontrei uma coluna de município comum. "
+        "Use 'id_municipio' ou 'municipio' em base e query."
+    )
+
+
+def append_csv(path: str, df: DataFrame) -> None:
+    write_header = not os.path.exists(path) or os.path.getsize(path) == 0
+    df.to_csv(path, mode="a", header=write_header, index=False)
+
+
+def append_resultados_por_municipio(df_resultados: DataFrame, metodo: str) -> None:
+    if df_resultados.empty:
+        return
+    os.makedirs(PATH_RESULTADOS_POR_MUNICIPIO_DIR, exist_ok=True)
+    df_resultados = df_resultados.reindex(columns=RESULTADOS_POR_MUNICIPIO_COLUMNS)
+    append_csv(PATH_RESULTADOS_POR_MUNICIPIO, df_resultados)
+    append_csv(os.path.join(PATH_RESULTADOS_POR_MUNICIPIO_DIR, f"{metodo}.csv"), df_resultados)
+
+
+def build_matches_por_municipio(
+    df_base_mun: DataFrame,
+    df_query_mun: DataFrame,
+    I: np.ndarray,
+    k_efetivo: int,
+    suffixes: Tuple[str, str],
+    scores: Optional[np.ndarray] = None,
+) -> DataFrame:
+    df_query_expanded = df_query_mun.loc[
+        np.repeat(df_query_mun.index.values, k_efetivo)
+    ].reset_index(drop=True)
+    df_base_expanded = df_base_mun.iloc[I.flatten()].reset_index(drop=True)
+
+    df_lm_matched = df_query_expanded.merge(
+        df_base_expanded,
+        left_index=True,
+        right_index=True,
+        how="inner",
+        suffixes=suffixes,
+    )
+
+    if scores is not None:
+        df_lm_matched["score"] = scores.flatten()
+
+    return df_lm_matched
+
+
+def count_setor_matches(df_lm_matched: DataFrame) -> int:
+    if "setor_censitario_x" in df_lm_matched.columns and "setor_censitario_y" in df_lm_matched.columns:
+        return int((df_lm_matched["setor_censitario_x"] == df_lm_matched["setor_censitario_y"]).sum())
+    return 0
+
 def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     # ================================
     #     INDEXAÇÃO (FAISS)
     # ================================
     # Medir tempo de criação do índice + add
-    safe_model = str(model).replace(os.sep, "_")
-    if os.path.altsep:
-        safe_model = safe_model.replace(os.path.altsep, "_")
+    safe_model = safe_model_name(model)
 
     print(f">>> [FAISS] Carregando embeddings do modelo: {model}", flush=True)
     embeddings1 = np.load(f"data/embeddings_base_{safe_model}.npy")
@@ -58,89 +138,101 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
         flush=True,
     )
 
-    start_index_time = time.time()
+    df1 = df1.copy().reset_index(drop=True)
+    df2 = df2.copy().reset_index(drop=True)
+    municipio_col = get_municipio_column(df1, df2)
     process = psutil.Process(os.getpid())
-    mem_before = process.memory_info().rss / (1024 ** 2)  # MB
-    
-    print(">>> [FAISS] Criando índice IndexFlatIP...", flush=True)
-    index = faiss.IndexFlatIP(embeddings1.shape[1])
-    print(">>> [FAISS] Adicionando embeddings base ao índice...", flush=True)
-    index.add(embeddings1)
-    
-    mem_after = process.memory_info().rss / (1024 ** 2)  # MB
-    mem_used_create_index = mem_after - mem_before
-    
-    index_time = time.time() - start_index_time
-    print(f"Memória utilizada na indexação: {mem_used_create_index:.2f} MB")
-    print(f"Tempo de indexação (FAISS): {index_time:.4f} segundos")
-
-    # ================================
-    #     BUSCA KNN (FAISS)
-    # ================================
     num_execucoes = NUM_EXECUCOES_BUSCA
-    soma_tempo_busca = 0.0
-    D = None
-    I = None
-    soma_qtde_mem = 0.0
 
     dict_ = {
         "execucao": [],
         "tempo_busca": [],
         "memoria_usada_busca_MB": [],
     }
+    resultados_municipio = []
+    matched_parts = []
 
-    print(">>> [FAISS] Iniciando busca KNN...", flush=True)
-    for i in range(num_execucoes):
-        start_search_time = time.time()
-        mem_before = process.memory_info().rss / (1024 ** 2)  # MB
-        D, I = index.search(embeddings2, k)
-        mem_after = process.memory_info().rss / (1024 ** 2)  # MB
-        mem_used_search = mem_after - mem_before
-        search_time = time.time() - start_search_time
-        soma_tempo_busca += search_time
+    print(">>> [FAISS] Iniciando busca por município...", flush=True)
+    for id_municipio in df2[municipio_col].dropna().drop_duplicates().tolist():
+        base_idx = df1.index[df1[municipio_col] == id_municipio].to_numpy()
+        query_idx = df2.index[df2[municipio_col] == id_municipio].to_numpy()
 
-        dict_["execucao"].append(i+1)
-        dict_["tempo_busca"].append(search_time)
-        dict_["memoria_usada_busca_MB"].append(mem_used_search)
+        if len(base_idx) == 0 or len(query_idx) == 0:
+            continue
 
+        k_efetivo = min(k, len(base_idx))
+        embeddings_base_mun = embeddings1[base_idx]
+        embeddings_query_mun = embeddings2[query_idx]
 
-    avg_search_time = soma_tempo_busca / num_execucoes
-    avg_mem_used_search = mem_used_search / num_execucoes
-    print(f"Tempo médio de busca (FAISS) em {num_execucoes} execuções: {avg_search_time:.4f} segundos")
+        start_index_time = time.time()
+        mem_before = process.memory_info().rss / (1024 ** 2)
+        index = faiss.IndexFlatIP(embeddings_base_mun.shape[1])
+        index.add(embeddings_base_mun)
+        mem_after = process.memory_info().rss / (1024 ** 2)
+        mem_used_create_index = mem_after - mem_before
+        index_time = time.time() - start_index_time
 
-    df_tempos_busca_faiss_baseline = pd.DataFrame(dict_)
-    df_tempos_busca_faiss_baseline['modelo_index'] = 'faiss_baseline'
+        soma_tempo_busca = 0.0
+        soma_memoria_busca = 0.0
+        D = None
+        I = None
+        for i in range(num_execucoes):
+            start_search_time = time.time()
+            mem_before = process.memory_info().rss / (1024 ** 2)
+            D, I = index.search(embeddings_query_mun, k_efetivo)
+            mem_after = process.memory_info().rss / (1024 ** 2)
+            mem_used_search = mem_after - mem_before
+            search_time = time.time() - start_search_time
+            soma_tempo_busca += search_time
+            soma_memoria_busca += mem_used_search
 
-    df_tempos_busca_faiss_baseline['modelo_embedding'] = model
+            dict_["execucao"].append(i + 1)
+            dict_["tempo_busca"].append(search_time)
+            dict_["memoria_usada_busca_MB"].append(mem_used_search)
 
-    df_aux = pd.read_csv(PATH_RESULTADOS_GERAL)
-    df_aux = pd.concat([df_aux, df_tempos_busca_faiss_baseline], ignore_index=True)
-    df_aux.to_csv(PATH_RESULTADOS_GERAL, index=False)
+        avg_search_time = soma_tempo_busca / num_execucoes
+        avg_mem_used_search = soma_memoria_busca / num_execucoes
 
+        df_lm_matched_mun = build_matches_por_municipio(
+            df1.iloc[base_idx].reset_index(drop=True),
+            df2.iloc[query_idx].reset_index(drop=True),
+            I,
+            k_efetivo,
+            suffixes,
+            D,
+        )
+        matched_parts.append(df_lm_matched_mun)
+        matches = count_setor_matches(df_lm_matched_mun)
 
-    df1 = df1.reset_index(drop=True)
-    df2 = df2.reset_index(drop=True)
+        resultados_municipio.append({
+            "metodo": "baseline",
+            "modelo_embedding": model,
+            "id_municipio": id_municipio,
+            "index_time": index_time,
+            "search_time": avg_search_time,
+            "total_time": index_time + avg_search_time,
+            "num_rows_df1": len(base_idx),
+            "num_rows_df2": len(query_idx),
+            "k": k,
+            "k_efetivo": k_efetivo,
+            "mem_used_indexation_MB": mem_used_create_index,
+            "avg_mem_used_search_MB": avg_mem_used_search,
+            "matches": matches,
+        })
 
-    # expandir df1 e df2 como na merge_knn
-    df1_expanded = df2.loc[np.repeat(df2.index.values, k)].reset_index(drop=True)
-    df2_expanded = df1.iloc[I.flatten()].reset_index(drop=True)    
+    df_lm_matched = pd.concat(matched_parts, ignore_index=True) if matched_parts else pd.DataFrame()
+    df_resultados_municipio = pd.DataFrame(resultados_municipio)
+    append_resultados_por_municipio(df_resultados_municipio, "baseline")
 
-    df_lm_matched = df1_expanded.merge(
-        df2_expanded,
-        left_index=True,
-        right_index=True,
-        how="inner",
-        suffixes=suffixes,
-    )
+    total_index_time = df_resultados_municipio["index_time"].sum() if not df_resultados_municipio.empty else 0.0
+    total_search_time = df_resultados_municipio["search_time"].sum() if not df_resultados_municipio.empty else 0.0
+    avg_mem_used_search = df_resultados_municipio["avg_mem_used_search_MB"].mean() if not df_resultados_municipio.empty else 0.0
+    mem_used_create_index = df_resultados_municipio["mem_used_indexation_MB"].sum() if not df_resultados_municipio.empty else 0.0
 
     print(
         f"LM matched on key columns - left: {None}{suffixes[0]}, "
         f"right: {None}{suffixes[1]}"
     )
-
-    safe_model = str(model).replace(os.sep, "_")
-    if os.path.altsep:
-        safe_model = safe_model.replace(os.path.altsep, "_")
 
     PATH_RESULTADOS_baseline = f"resultados/baseline/{safe_model}"
 
@@ -151,20 +243,28 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
         os.makedirs(PATH_RESULTADOS_baseline)
 
     RESULTADO_DE_TEMPO = f"csv_final_tempos_buscas.csv"
+    df_tempos_busca_faiss_baseline = pd.DataFrame(dict_)
+    df_tempos_busca_faiss_baseline['modelo_index'] = 'faiss_baseline'
+    df_tempos_busca_faiss_baseline['modelo_embedding'] = model
+
+    df_aux = pd.read_csv(PATH_RESULTADOS_GERAL)
+    df_aux = pd.concat([df_aux, df_tempos_busca_faiss_baseline], ignore_index=True)
+    df_aux.to_csv(PATH_RESULTADOS_GERAL, index=False)
+
     df_tempos_busca_faiss_baseline.to_csv(os.path.join(PATH_RESULTADOS_baseline, RESULTADO_DE_TEMPO), index=False)
 
     # ================================
     #   SALVAR MÉDIAS DOS RESULTADOS
     # ================================
     results_file = "resultados.csv"
-    total_time = index_time + avg_search_time
-    df_lm_matched.to_csv('teste.csv')
-    matches = (df_lm_matched["setor_censitario_x"] == df_lm_matched["setor_censitario_y"]).sum()
+    total_time = total_index_time + total_search_time
+    df_lm_matched.to_csv('teste.csv', index=False)
+    matches = count_setor_matches(df_lm_matched)
     results_data = {
         "metodo": ["baseline"],
         "modelo_embedding": [model],
-        "index_time": [index_time],
-        "search_time": [avg_search_time],
+        "index_time": [total_index_time],
+        "search_time": [total_search_time],
         "total_time": [total_time],
         "num_rows_df1": [len(df1)],
         "num_rows_df2": [len(df2)],
@@ -195,9 +295,7 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     #     CARREGAR EMBEDDINGS
     # ================================
-    safe_model = str(model).replace(os.sep, "_")
-    if os.path.altsep:
-        safe_model = safe_model.replace(os.path.altsep, "_")
+    safe_model = safe_model_name(model)
 
     print(f">>> [SVS] Carregando embeddings do modelo: {model}", flush=True)
     embeddings1 = np.load(f"data/embeddings_base_{safe_model}.npy")
@@ -207,73 +305,105 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
         flush=True,
     )
 
-    # ================================
-    #     INDEXAÇÃO (SVS / Vamana)
-    # ================================
+    df1 = df1.copy().reset_index(drop=True)
+    df2 = df2.copy().reset_index(drop=True)
+    municipio_col = get_municipio_column(df1, df2)
     class_svs = VamanaIndexer()
-
-    # Aqui vamos seguir a mesma lógica da FAISS:
-    #   - df2 é a base indexada (candidatos)
-    #   - df1 gera as queries
-    # Logo, indexamos embeddings2 (df2) e consultamos com embeddings1 (df1)
-    start_index_time = time.time()
     process = psutil.Process(os.getpid())
-    mem_before = process.memory_info().rss / (1024 ** 2)  # MB
-    
-    print(">>> [SVS] Construindo índice Vamana...", flush=True)
-    index = class_svs.build(
-        base_embeddings=embeddings1,        # base indexada (df2)
-        reduced_dims=128,                   # projeção para 128D
-        graph_max_degree=64,                # M (grau máximo do grafo)
-        window_size=128,                    # janela para construção
-        distance="L2",                      # métrica L2
-        num_threads=4,                      # paralelismo
-        primary_kind="lvq4",
-        secondary_kind="lvq8",
-    )
-
-    
-    mem_after = process.memory_info().rss / (1024 ** 2)  # MB
-    mem_used_create_index = mem_after - mem_before
-    print(f"Memória utilizada na indexação (SVS): {mem_used_create_index:.2f} MB")
-    index_time = time.time() - start_index_time
-    print(f"Tempo de indexação (SVS): {index_time:.4f} segundos")
-
-    # ================================
-    #     BUSCA KNN (SVS)
-    # ================================
     num_execucoes = NUM_EXECUCOES_BUSCA
-    soma_tempo_busca = 0.0
-    soma_qtde_mem = 0.0
-    I = None
-    D = None
 
     dict_ = {
         "execucao": [],
         "tempo_busca": [],
         "memoria_usada_busca_MB": [],
     }
+    resultados_municipio = []
+    matched_parts = []
 
+    print(">>> [SVS] Iniciando busca por município...", flush=True)
+    for id_municipio in df2[municipio_col].dropna().drop_duplicates().tolist():
+        base_idx = df1.index[df1[municipio_col] == id_municipio].to_numpy()
+        query_idx = df2.index[df2[municipio_col] == id_municipio].to_numpy()
 
-    print("Searching SVS index")
-    print(">>> [SVS] Iniciando busca KNN...", flush=True)
-    for i in range(num_execucoes):
-        start_search_time = time.time()
-        # consultas: embeddings1 (df1) procurando em embeddings2 (df2)
-        mem_before = process.memory_info().rss / (1024 ** 2)  # MB
-        I, D = index.search(embeddings2, k)
-        mem_after = process.memory_info().rss / (1024 ** 2)  # MB
-        mem_used_search = mem_after - mem_before
-        soma_qtde_mem += mem_used_search
-        search_time = time.time() - start_search_time
-        soma_tempo_busca += search_time
+        if len(base_idx) == 0 or len(query_idx) == 0:
+            continue
 
-        dict_["execucao"].append(i+1)
-        dict_["tempo_busca"].append(search_time)
-        dict_["memoria_usada_busca_MB"].append(mem_used_search)
+        k_efetivo = min(k, len(base_idx))
+        embeddings_base_mun = embeddings1[base_idx]
+        embeddings_query_mun = embeddings2[query_idx]
 
-    avg_search_time = soma_tempo_busca / num_execucoes
-    avg_mem_used_search = soma_qtde_mem / num_execucoes
+        start_index_time = time.time()
+        mem_before = process.memory_info().rss / (1024 ** 2)
+        index = class_svs.build(
+            base_embeddings=embeddings_base_mun,
+            reduced_dims=128,
+            graph_max_degree=64,
+            window_size=128,
+            distance="L2",
+            num_threads=4,
+            primary_kind="lvq4",
+            secondary_kind="lvq8",
+        )
+        mem_after = process.memory_info().rss / (1024 ** 2)
+        mem_used_create_index = mem_after - mem_before
+        index_time = time.time() - start_index_time
+
+        soma_tempo_busca = 0.0
+        soma_memoria_busca = 0.0
+        I = None
+        D = None
+        for i in range(num_execucoes):
+            start_search_time = time.time()
+            mem_before = process.memory_info().rss / (1024 ** 2)
+            I, D = index.search(embeddings_query_mun, k_efetivo)
+            mem_after = process.memory_info().rss / (1024 ** 2)
+            mem_used_search = mem_after - mem_before
+            search_time = time.time() - start_search_time
+            soma_tempo_busca += search_time
+            soma_memoria_busca += mem_used_search
+
+            dict_["execucao"].append(i + 1)
+            dict_["tempo_busca"].append(search_time)
+            dict_["memoria_usada_busca_MB"].append(mem_used_search)
+
+        avg_search_time = soma_tempo_busca / num_execucoes
+        avg_mem_used_search = soma_memoria_busca / num_execucoes
+
+        df_lm_matched_mun = build_matches_por_municipio(
+            df1.iloc[base_idx].reset_index(drop=True),
+            df2.iloc[query_idx].reset_index(drop=True),
+            I,
+            k_efetivo,
+            suffixes,
+            D,
+        )
+        matched_parts.append(df_lm_matched_mun)
+        matches = count_setor_matches(df_lm_matched_mun)
+
+        resultados_municipio.append({
+            "metodo": "svs",
+            "modelo_embedding": model,
+            "id_municipio": id_municipio,
+            "index_time": index_time,
+            "search_time": avg_search_time,
+            "total_time": index_time + avg_search_time,
+            "num_rows_df1": len(base_idx),
+            "num_rows_df2": len(query_idx),
+            "k": k,
+            "k_efetivo": k_efetivo,
+            "mem_used_indexation_MB": mem_used_create_index,
+            "avg_mem_used_search_MB": avg_mem_used_search,
+            "matches": matches,
+        })
+
+    df_lm_matched = pd.concat(matched_parts, ignore_index=True) if matched_parts else pd.DataFrame()
+    df_resultados_municipio = pd.DataFrame(resultados_municipio)
+    append_resultados_por_municipio(df_resultados_municipio, "svs")
+
+    total_index_time = df_resultados_municipio["index_time"].sum() if not df_resultados_municipio.empty else 0.0
+    total_search_time = df_resultados_municipio["search_time"].sum() if not df_resultados_municipio.empty else 0.0
+    avg_mem_used_search = df_resultados_municipio["avg_mem_used_search_MB"].mean() if not df_resultados_municipio.empty else 0.0
+    mem_used_create_index = df_resultados_municipio["mem_used_indexation_MB"].sum() if not df_resultados_municipio.empty else 0.0
 
     df_tempos_busca_svs = pd.DataFrame(dict_)
     df_tempos_busca_svs['modelo_index'] = 'svs'
@@ -283,38 +413,12 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     df_aux = pd.concat([df_aux, df_tempos_busca_svs], ignore_index=True)
     df_aux.to_csv(PATH_RESULTADOS_GERAL, index=False)
 
-    # ================================
-    #     MERGE FUZZY
-    # ================================
-    df1 = df1.reset_index(drop=True)
-    df2 = df2.reset_index(drop=True)
-
-    # expandir df1 e df2 como na merge_knn
-    df1_expanded = df2.loc[np.repeat(df2.index.values, k)].reset_index(drop=True)
-    df2_expanded = df1.iloc[I.flatten()].reset_index(drop=True)    
-
-    df_lm_matched = df1_expanded.merge(
-        df2_expanded,
-        left_index=True,
-        right_index=True,
-        how="inner",
-        suffixes=suffixes,
-    )
-
-    # D aqui costuma ser distância (L2); se quiser pode transformar em similaridade
-    # por agora seguimos o padrão e usamos D "cru" como score:
-    df_lm_matched["score"] = D.flatten()
-
     df_lm_matched.to_csv(f"df_lm_matched_svs.csv", index=False)
 
     print(
         f"LM matched (SVS) - left: {None}{suffixes[0]}, "
         f"right: {None}{suffixes[1]}"
     )
-
-    safe_model = str(model).replace(os.sep, "_")
-    if os.path.altsep:
-        safe_model = safe_model.replace(os.path.altsep, "_")
 
     PATH_RESULTADOS_SVS = f"resultados/svs/{safe_model}"
 
@@ -331,13 +435,13 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     #   SALVAR MÉDIAS DOS RESULTADOS
     # ================================
     results_file = "resultados.csv"
-    total_time = index_time + avg_search_time
-    matches = (df_lm_matched["setor_censitario_x"] == df_lm_matched["setor_censitario_y"]).sum()
+    total_time = total_index_time + total_search_time
+    matches = count_setor_matches(df_lm_matched)
     results_data = {
         "metodo": ["svs"],
         "modelo_embedding": [model],
-        "index_time": [index_time],
-        "search_time": [avg_search_time],
+        "index_time": [total_index_time],
+        "search_time": [total_search_time],
         "total_time": [total_time],
         "num_rows_df1": [len(df1)],
         "num_rows_df2": [len(df2)],
@@ -368,9 +472,7 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     #     CARREGAR EMBEDDINGS
     # ================================
-    safe_model = str(model).replace(os.sep, "_")
-    if os.path.altsep:
-        safe_model = safe_model.replace(os.path.altsep, "_")
+    safe_model = safe_model_name(model)
 
     embeddings1 = np.load(f"data/embeddings_base_{safe_model}.npy")
     embeddings2 = np.load(f"data/embeddings_query_{safe_model}.npy")
@@ -387,48 +489,95 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
 
     Main.include("hnsw_julia/hnsw_wrapper.jl")
 
-    # Indexar a BASE = df2 / embeddings2, igual ao padrão FAISS/SVS/NMSLIB
-    start_index_time = time.time()
+    df1 = df1.copy().reset_index(drop=True)
+    df2 = df2.copy().reset_index(drop=True)
+    municipio_col = get_municipio_column(df1, df2)
     process = psutil.Process(os.getpid())
-    mem_before = process.memory_info().rss / (1024 ** 2)  # MB
-    
-    hnsw = Main.build_hnsw(embeddings1)
-    
-    mem_after = process.memory_info().rss / (1024 ** 2)  # MB
-    mem_used_create_index = mem_after - mem_before
-    print(f"Memória utilizada na indexação (HNSW Julia): {mem_used_create_index:.2f} MB")
-    index_time = time.time() - start_index_time
-    print(f"Tempo de criação do índice (HNSW Julia): {index_time:.4f} segundos")
-
-    # ================================
-    #     BUSCA KNN
-    # ================================
-    soma_tempo_busca = 0.0
     num_execucoes = NUM_EXECUCOES_BUSCA
-    I = None
-    D = None
-    soma_memoria_usada = 0.0
-    
+
     dict_ = {
         "execucao": [],
         "tempo_busca": [],
         "memoria_usada_busca_MB": [],
     }
+    resultados_municipio = []
+    matched_parts = []
 
-    for i in range(num_execucoes):
-        start_search_time = time.time()
-        # search_hnsw(hnsw, queries, k)  -> (I, D, tempo_busca)
-        mem_before = process.memory_info().rss / (1024 ** 2)  # MB
-        I, D, tempo_busca = Main.search_hnsw(hnsw, embeddings2)
-        mem_after = process.memory_info().rss / (1024 ** 2)  # MB
-        mem_used_search = mem_after - mem_before
-        soma_memoria_usada += mem_used_search
-        search_time = time.time() - start_search_time
-        soma_tempo_busca += tempo_busca  # ou search_time, se preferir consistência
+    print(">>> [HNSW Julia] Iniciando busca por município...", flush=True)
+    for id_municipio in df2[municipio_col].dropna().drop_duplicates().tolist():
+        base_idx = df1.index[df1[municipio_col] == id_municipio].to_numpy()
+        query_idx = df2.index[df2[municipio_col] == id_municipio].to_numpy()
 
-        dict_["execucao"].append(i+1)
-        dict_["tempo_busca"].append(tempo_busca)
-        dict_["memoria_usada_busca_MB"].append(mem_used_search)
+        if len(base_idx) == 0 or len(query_idx) == 0:
+            continue
+
+        k_efetivo = min(k, len(base_idx))
+        embeddings_base_mun = embeddings1[base_idx]
+        embeddings_query_mun = embeddings2[query_idx]
+
+        start_index_time = time.time()
+        mem_before = process.memory_info().rss / (1024 ** 2)
+        hnsw = Main.build_hnsw(embeddings_base_mun)
+        mem_after = process.memory_info().rss / (1024 ** 2)
+        mem_used_create_index = mem_after - mem_before
+        index_time = time.time() - start_index_time
+
+        soma_tempo_busca = 0.0
+        soma_memoria_busca = 0.0
+        I = None
+        D = None
+        for i in range(num_execucoes):
+            mem_before = process.memory_info().rss / (1024 ** 2)
+            I, D, tempo_busca = Main.search_hnsw(hnsw, embeddings_query_mun, K=k_efetivo)
+            mem_after = process.memory_info().rss / (1024 ** 2)
+            mem_used_search = mem_after - mem_before
+            soma_tempo_busca += tempo_busca
+            soma_memoria_busca += mem_used_search
+
+            dict_["execucao"].append(i + 1)
+            dict_["tempo_busca"].append(tempo_busca)
+            dict_["memoria_usada_busca_MB"].append(mem_used_search)
+
+        I = np.asarray(I) - 1
+        D = np.asarray(D)
+        avg_search_time = soma_tempo_busca / num_execucoes
+        avg_mem_used_search = soma_memoria_busca / num_execucoes
+
+        df_lm_matched_mun = build_matches_por_municipio(
+            df1.iloc[base_idx].reset_index(drop=True),
+            df2.iloc[query_idx].reset_index(drop=True),
+            I,
+            k_efetivo,
+            suffixes,
+            D,
+        )
+        matched_parts.append(df_lm_matched_mun)
+        matches = count_setor_matches(df_lm_matched_mun)
+
+        resultados_municipio.append({
+            "metodo": "hnsw_julia",
+            "modelo_embedding": model,
+            "id_municipio": id_municipio,
+            "index_time": index_time,
+            "search_time": avg_search_time,
+            "total_time": index_time + avg_search_time,
+            "num_rows_df1": len(base_idx),
+            "num_rows_df2": len(query_idx),
+            "k": k,
+            "k_efetivo": k_efetivo,
+            "mem_used_indexation_MB": mem_used_create_index,
+            "avg_mem_used_search_MB": avg_mem_used_search,
+            "matches": matches,
+        })
+
+    df_lm_matched = pd.concat(matched_parts, ignore_index=True) if matched_parts else pd.DataFrame()
+    df_resultados_municipio = pd.DataFrame(resultados_municipio)
+    append_resultados_por_municipio(df_resultados_municipio, "hnsw_julia")
+
+    total_index_time = df_resultados_municipio["index_time"].sum() if not df_resultados_municipio.empty else 0.0
+    total_search_time = df_resultados_municipio["search_time"].sum() if not df_resultados_municipio.empty else 0.0
+    avg_mem_used_search = df_resultados_municipio["avg_mem_used_search_MB"].mean() if not df_resultados_municipio.empty else 0.0
+    mem_used_create_index = df_resultados_municipio["mem_used_indexation_MB"].sum() if not df_resultados_municipio.empty else 0.0
 
     df_tempos_busca_hnsw_julia = pd.DataFrame(dict_)
     df_tempos_busca_hnsw_julia['modelo_index'] = 'hnsw_julia'
@@ -438,41 +587,10 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     df_aux = pd.concat([df_aux, df_tempos_busca_hnsw_julia], ignore_index=True)
     df_aux.to_csv(PATH_RESULTADOS_GERAL, index=False)
 
-    # Julia costuma retornar índices 1-based
-    I = I - 1
-
-    avg_search_time = soma_tempo_busca / num_execucoes
-    avg_mem_used_search = soma_memoria_usada / num_execucoes
-    print(f"Tempo médio de busca (HNSW Julia) em {num_execucoes} execuções: {avg_search_time:.4f} segundos")
-
-    # ================================
-    #     MERGE FUZZY
-    # ================================
-    df1 = df1.reset_index(drop=True)
-    df2 = df2.reset_index(drop=True)
-
-    # expandir df1 e df2 como na merge_knn
-    df1_expanded = df2.loc[np.repeat(df2.index.values, k)].reset_index(drop=True)
-    df2_expanded = df1.iloc[I.flatten()].reset_index(drop=True)    
-
-    df_lm_matched = df1_expanded.merge(
-        df2_expanded,
-        left_index=True,
-        right_index=True,
-        how="inner",
-        suffixes=suffixes,
-    )
-
-    df_lm_matched["score"] = D.flatten()
-
     print(
         f"LM matched (HNSW Julia) - left: {None}{suffixes[0]}, "
         f"right: {None}{suffixes[1]}"
     )
-
-    safe_model = str(model).replace(os.sep, "_")
-    if os.path.altsep:
-        safe_model = safe_model.replace(os.path.altsep, "_")
 
     PATH_RESULTADOS_hnsw_julia = f"resultados/hnsw_julia/{safe_model}"
 
@@ -489,13 +607,13 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     #   SALVAR MÉDIAS DOS RESULTADOS
     # ================================
     results_file = "resultados.csv"
-    total_time = index_time + avg_search_time
-    matches = (df_lm_matched["setor_censitario_x"] == df_lm_matched["setor_censitario_y"]).sum()
+    total_time = total_index_time + total_search_time
+    matches = count_setor_matches(df_lm_matched)
     results_data = {
         "metodo": ["hnsw_julia"],
         "modelo_embedding": [model],
-        "index_time": [index_time],
-        "search_time": [avg_search_time],
+        "index_time": [total_index_time],
+        "search_time": [total_search_time],
         "total_time": [total_time],
         "num_rows_df1": [len(df1)],
         "num_rows_df2": [len(df2)],
@@ -528,9 +646,7 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     #     CARREGAR EMBEDDINGS
     # ================================
-    safe_model = str(model).replace(os.sep, "_")
-    if os.path.altsep:
-        safe_model = safe_model.replace(os.path.altsep, "_")
+    safe_model = safe_model_name(model)
 
     embeddings1 = np.load(f"data/embeddings_base_{safe_model}.npy")
     embeddings2 = np.load(f"data/embeddings_query_{safe_model}.npy")
@@ -539,71 +655,111 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
     embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
 
-    # ================================
-    #     INDEXAÇÃO (NMSLIB / HNSW)
-    # ================================
-    start_index_time = time.time()
-
+    df1 = df1.copy().reset_index(drop=True)
+    df2 = df2.copy().reset_index(drop=True)
+    municipio_col = get_municipio_column(df1, df2)
     process = psutil.Process(os.getpid())
-    mem_before = process.memory_info().rss / (1024 ** 2)  # MB
-    
-    index = nmslib.init(
-        space="cosinesimil",
-        method="hnsw"
-    )
-    index.addDataPointBatch(embeddings1)  # base indexada = df2
-
-    index.createIndex(
-        {
-            "M": 48,
-            "efConstruction": 600,
-        },
-        print_progress=False,
-    )
-    
-    mem_after = process.memory_info().rss / (1024 ** 2)  # MB
-    mem_used_create_index = mem_after - mem_before
-    print(f"Memória utilizada na indexação (NMSLIB): {mem_used_create_index:.2f} MB")
-
-    index_time = time.time() - start_index_time
-    print(f"Tempo de criação do índice (NMSLIB HNSW): {index_time:.4f} segundos")
-
-    index.setQueryTimeParams({"efSearch": 50})
-
-    # ================================
-    #     BUSCA KNN (NMSLIB)
-    # ================================
     num_execucoes = NUM_EXECUCOES_BUSCA
-    soma_tempo_busca = 0.0
-    neighbors = None
-    distances = None
-    soma_qtde_mem = 0.0
 
     dict_ = {
         "execucao": [],
         "tempo_busca": [],
         "memoria_usada_busca_MB": [],
     }
+    resultados_municipio = []
+    matched_parts = []
 
-    for i in range(num_execucoes):
-        start_search_time = time.time()
-        mem_before = process.memory_info().rss / (1024 ** 2)  # MB
-        res = index.knnQueryBatch(embeddings2, k=k)  # queries = df1
-        mem_after = process.memory_info().rss / (1024 ** 2)  # MB
-        mem_used_search = mem_after - mem_before
-        soma_qtde_mem += mem_used_search
-        search_time = time.time() - start_search_time
-        soma_tempo_busca += search_time
-        neighbors, distances = zip(*res)
+    print(">>> [NMSLIB] Iniciando busca por município...", flush=True)
+    for id_municipio in df2[municipio_col].dropna().drop_duplicates().tolist():
+        base_idx = df1.index[df1[municipio_col] == id_municipio].to_numpy()
+        query_idx = df2.index[df2[municipio_col] == id_municipio].to_numpy()
 
-        dict_["execucao"].append(i+1)
-        dict_["tempo_busca"].append(search_time)
-        dict_["memoria_usada_busca_MB"].append(mem_used_search)
+        if len(base_idx) == 0 or len(query_idx) == 0:
+            continue
 
+        k_efetivo = min(k, len(base_idx))
+        embeddings_base_mun = embeddings1[base_idx]
+        embeddings_query_mun = embeddings2[query_idx]
 
-    avg_search_time = soma_tempo_busca / num_execucoes
-    avg_mem_used_search = soma_qtde_mem / num_execucoes
-    print(f"Tempo médio de busca (NMSLIB HNSW) em {num_execucoes} execuções: {avg_search_time:.4f} segundos")
+        start_index_time = time.time()
+        mem_before = process.memory_info().rss / (1024 ** 2)
+        index = nmslib.init(
+            space="cosinesimil",
+            method="hnsw"
+        )
+        index.addDataPointBatch(embeddings_base_mun)
+        index.createIndex(
+            {
+                "M": 48,
+                "efConstruction": 600,
+            },
+            print_progress=False,
+        )
+        index.setQueryTimeParams({"efSearch": 50})
+        mem_after = process.memory_info().rss / (1024 ** 2)
+        mem_used_create_index = mem_after - mem_before
+        index_time = time.time() - start_index_time
+
+        soma_tempo_busca = 0.0
+        soma_memoria_busca = 0.0
+        neighbors = None
+        distances = None
+        for i in range(num_execucoes):
+            start_search_time = time.time()
+            mem_before = process.memory_info().rss / (1024 ** 2)
+            res = index.knnQueryBatch(embeddings_query_mun, k=k_efetivo)
+            mem_after = process.memory_info().rss / (1024 ** 2)
+            mem_used_search = mem_after - mem_before
+            search_time = time.time() - start_search_time
+            soma_tempo_busca += search_time
+            soma_memoria_busca += mem_used_search
+            neighbors, distances = zip(*res)
+
+            dict_["execucao"].append(i + 1)
+            dict_["tempo_busca"].append(search_time)
+            dict_["memoria_usada_busca_MB"].append(mem_used_search)
+
+        avg_search_time = soma_tempo_busca / num_execucoes
+        avg_mem_used_search = soma_memoria_busca / num_execucoes
+        I = np.vstack(neighbors)
+        D_dist = np.vstack(distances)
+        score_sim = 1.0 - D_dist
+
+        df_lm_matched_mun = build_matches_por_municipio(
+            df1.iloc[base_idx].reset_index(drop=True),
+            df2.iloc[query_idx].reset_index(drop=True),
+            I,
+            k_efetivo,
+            suffixes,
+            score_sim,
+        )
+        matched_parts.append(df_lm_matched_mun)
+        matches = count_setor_matches(df_lm_matched_mun)
+
+        resultados_municipio.append({
+            "metodo": "NMSLIB",
+            "modelo_embedding": model,
+            "id_municipio": id_municipio,
+            "index_time": index_time,
+            "search_time": avg_search_time,
+            "total_time": index_time + avg_search_time,
+            "num_rows_df1": len(base_idx),
+            "num_rows_df2": len(query_idx),
+            "k": k,
+            "k_efetivo": k_efetivo,
+            "mem_used_indexation_MB": mem_used_create_index,
+            "avg_mem_used_search_MB": avg_mem_used_search,
+            "matches": matches,
+        })
+
+    df_lm_matched = pd.concat(matched_parts, ignore_index=True) if matched_parts else pd.DataFrame()
+    df_resultados_municipio = pd.DataFrame(resultados_municipio)
+    append_resultados_por_municipio(df_resultados_municipio, "NMSLIB")
+
+    total_index_time = df_resultados_municipio["index_time"].sum() if not df_resultados_municipio.empty else 0.0
+    total_search_time = df_resultados_municipio["search_time"].sum() if not df_resultados_municipio.empty else 0.0
+    avg_mem_used_search = df_resultados_municipio["avg_mem_used_search_MB"].mean() if not df_resultados_municipio.empty else 0.0
+    mem_used_create_index = df_resultados_municipio["mem_used_indexation_MB"].sum() if not df_resultados_municipio.empty else 0.0
 
     df_tempos_busca_nmslib_hnsw = pd.DataFrame(dict_)
     df_tempos_busca_nmslib_hnsw['modelo_index'] = 'nmslib_hnsw'
@@ -614,40 +770,10 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     df_aux.to_csv(PATH_RESULTADOS_GERAL, index=False)
 
 
-    I = np.vstack(neighbors)       # indices em df2
-    D_dist = np.vstack(distances)  # distâncias
-
-    # Converter distâncias em similaridade (maior = melhor)
-    score_sim = 1.0 - D_dist
-
-    # ================================
-    #     MERGE FUZZY
-    # ================================
-    df1 = df1.reset_index(drop=True)
-    df2 = df2.reset_index(drop=True)
-
-    # expandir df1 e df2 como na merge_knn
-    df1_expanded = df2.loc[np.repeat(df2.index.values, k)].reset_index(drop=True)
-    df2_expanded = df1.iloc[I.flatten()].reset_index(drop=True)    
-
-    df_lm_matched = df1_expanded.merge(
-        df2_expanded,
-        left_index=True,
-        right_index=True,
-        how="inner",
-        suffixes=suffixes,
-    )
-
-    df_lm_matched["score"] = score_sim.flatten()
-
     print(
         f"LM matched (NMSLIB HNSW) - left: {None}{suffixes[0]}, "
         f"right: {None}{suffixes[1]}"
     )
-
-    safe_model = str(model).replace(os.sep, "_")
-    if os.path.altsep:
-        safe_model = safe_model.replace(os.path.altsep, "_")
 
     PATH_RESULTADOS_NMSLIB = f"resultados/NMSLIB/{safe_model}"
 
@@ -664,13 +790,13 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     #   SALVAR MÉDIAS DOS RESULTADOS
     # ================================
     results_file = "resultados.csv"
-    total_time = index_time + avg_search_time
-    matches = (df_lm_matched["setor_censitario_x"] == df_lm_matched["setor_censitario_y"]).sum()
+    total_time = total_index_time + total_search_time
+    matches = count_setor_matches(df_lm_matched)
     results_data = {
         "metodo": ["NMSLIB"],
         "modelo_embedding": [model],
-        "index_time": [index_time],
-        "search_time": [avg_search_time],
+        "index_time": [total_index_time],
+        "search_time": [total_search_time],
         "total_time": [total_time],
         "num_rows_df1": [len(df1)],
         "num_rows_df2": [len(df2)],

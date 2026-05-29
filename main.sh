@@ -15,6 +15,8 @@ fi
 # Criar o resultados.csv no mesmo diretório do script
 rm -f "$SCRIPT_DIR/resultados.csv"
 touch "$SCRIPT_DIR/resultados.csv"
+rm -f "$SCRIPT_DIR/resultados_por_municipio.csv"
+rm -rf "$SCRIPT_DIR/resultados_por_municipio"
 
 echo "metodo,modelo_embedding,index_time,search_time,total_time,num_rows_df1,num_rows_df2,k,mem_used_indexation_MB,avg_mem_used_search_MB,matches" > "$SCRIPT_DIR/resultados.csv"
 
