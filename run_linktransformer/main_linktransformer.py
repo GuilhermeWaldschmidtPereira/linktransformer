@@ -109,19 +109,38 @@ def load_input_data():
         file_size_mb = os.path.getsize(path) / (1024 * 1024)
         print(f">>> Arquivo {path} ({file_size_mb:.2f} MB)", flush=True)
 
+        candidates = []
         for sep in [",", ";"]:
             try:
                 print(f">>> Tentando ler {path} com sep='{sep}'...", flush=True)
                 df = pd.read_csv(path, sep=sep)
-                print(f"    Sucesso! Arquivo lido com sep='{sep}' | linhas={len(df)} | colunas={len(df.columns)}", flush=True)
-                return df
+                print(
+                    f"    Sucesso! Arquivo lido com sep='{sep}' | linhas={len(df)} | "
+                    f"colunas={len(df.columns)}",
+                    flush=True,
+                )
+                candidates.append((sep, df))
             except pd.errors.ParserError as e:
                 print(f"    Falha com sep='{sep}': ParserError -> {str(e)[:150]}", flush=True)
             except Exception as e:
                 print(f"    Falha com sep='{sep}': {type(e).__name__} -> {str(e)[:150]}", flush=True)
                 continue
 
-        raise ValueError(f"Não consegui ler {path} com nenhum separador testado (,;)")
+        if not candidates:
+            raise ValueError(f"Não consegui ler {path} com nenhum separador testado (,;)")
+
+        for sep, df in candidates:
+            if "id_municipio" in df.columns or "municipio" in df.columns:
+                print(f"    Usando sep='{sep}' porque encontrou coluna de município.", flush=True)
+                return df
+
+        sep, df = max(candidates, key=lambda item: len(item[1].columns))
+        print(
+            f"    Usando sep='{sep}' por ter mais colunas ({len(df.columns)}), "
+            "mas sem coluna de município explícita.",
+            flush=True,
+        )
+        return df
 
     return read_csv_with_fallback(base_path), read_csv_with_fallback(query_path)
 
