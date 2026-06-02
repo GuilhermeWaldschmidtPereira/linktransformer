@@ -21,6 +21,21 @@ from transformers import TrainingArguments, Trainer
 from linktransformer.main_svs import VamanaIndexer
 import time
 
+def get_data_dir_candidates() -> List[str]:
+    candidates = []
+    env_data_dir = os.environ.get("LINKTRANSFORMER_DATA_DIR")
+    if env_data_dir:
+        candidates.append(os.path.abspath(env_data_dir))
+    candidates.extend([
+        os.path.abspath("data"),
+        os.path.abspath(os.path.join("linktransformer", "data")),
+    ])
+    return list(dict.fromkeys(candidates))
+
+
+DATA_DIR_CANDIDATES = get_data_dir_candidates()
+
+
 def build_results_dir() -> str:
     results_dir = os.environ.get("LINKTRANSFORMER_RESULTS_DIR")
     if results_dir:
@@ -75,6 +90,87 @@ def safe_model_name(model) -> str:
     if os.path.altsep:
         safe_model = safe_model.replace(os.path.altsep, "_")
     return safe_model
+
+
+def sanitize_municipality_id(municipality_id: object) -> str:
+    if pd.notna(municipality_id) and isinstance(municipality_id, (int, float, np.integer, np.floating)):
+        municipality_float = float(municipality_id)
+        if municipality_float.is_integer():
+            return str(int(municipality_float))
+
+    value = str(municipality_id).strip()
+    if not value:
+        return "vazio"
+
+    try:
+        municipality_float = float(value)
+        if municipality_float.is_integer():
+            return str(int(municipality_float))
+    except ValueError:
+        pass
+
+    return "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in value)
+
+
+def get_flat_embeddings_path(side: str, safe_model: str) -> str:
+    filename = f"embeddings_{side}_{safe_model}.npy"
+    for data_dir in DATA_DIR_CANDIDATES:
+        path = os.path.join(data_dir, filename)
+        if os.path.exists(path):
+            return path
+    return os.path.join(DATA_DIR_CANDIDATES[0], filename)
+
+
+def get_partitioned_embeddings_dir(side: str, safe_model: str) -> str:
+    relative_path = os.path.join(side, safe_model)
+    for data_dir in DATA_DIR_CANDIDATES:
+        path = os.path.join(data_dir, relative_path)
+        if os.path.isdir(path):
+            return path
+    return os.path.join(DATA_DIR_CANDIDATES[0], relative_path)
+
+
+def get_partitioned_embeddings_path(side: str, safe_model: str, municipio_id: object) -> str:
+    municipio_safe = sanitize_municipality_id(municipio_id)
+    return os.path.join(
+        get_partitioned_embeddings_dir(side, safe_model),
+        f"embedding_{side}_{municipio_safe}.npy",
+    )
+
+
+def has_partitioned_embeddings(safe_model: str) -> bool:
+    return all(
+        os.path.isdir(get_partitioned_embeddings_dir(side, safe_model))
+        for side in ("base", "query")
+    )
+
+
+def load_flat_embeddings(safe_model: str) -> Tuple[np.ndarray, np.ndarray]:
+    embeddings_base_path = get_flat_embeddings_path("base", safe_model)
+    embeddings_query_path = get_flat_embeddings_path("query", safe_model)
+    return np.load(embeddings_base_path), np.load(embeddings_query_path)
+
+
+def load_partitioned_embeddings(
+    side: str,
+    safe_model: str,
+    municipio_id: object,
+    expected_rows: int,
+) -> np.ndarray:
+    path = get_partitioned_embeddings_path(side, safe_model, municipio_id)
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"Embedding particionado não encontrado para {side}, "
+            f"modelo={safe_model}, municipio={municipio_id}: {path}"
+        )
+
+    embeddings = np.load(path)
+    if len(embeddings) != expected_rows:
+        raise ValueError(
+            f"Quantidade de embeddings incompatível em {path}: "
+            f"esperado={expected_rows}, encontrado={len(embeddings)}"
+        )
+    return embeddings
 
 
 def get_municipio_column(df1: DataFrame, df2: DataFrame) -> str:
@@ -140,13 +236,23 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     # Medir tempo de criação do índice + add
     safe_model = safe_model_name(model)
 
-    print(f">>> [FAISS] Carregando embeddings do modelo: {model}", flush=True)
-    embeddings1 = np.load(f"data/embeddings_base_{safe_model}.npy")
-    embeddings2 = np.load(f"data/embeddings_query_{safe_model}.npy")
-    print(
-        f">>> [FAISS] Embeddings carregados | base={embeddings1.shape} | query={embeddings2.shape}",
-        flush=True,
-    )
+    use_partitioned_embeddings = has_partitioned_embeddings(safe_model)
+    embeddings1 = None
+    embeddings2 = None
+    if use_partitioned_embeddings:
+        print(
+            f">>> [FAISS] Usando embeddings particionados em "
+            f"{get_partitioned_embeddings_dir('base', safe_model)} e "
+            f"{get_partitioned_embeddings_dir('query', safe_model)}",
+            flush=True,
+        )
+    else:
+        print(f">>> [FAISS] Carregando embeddings do modelo: {model}", flush=True)
+        embeddings1, embeddings2 = load_flat_embeddings(safe_model)
+        print(
+            f">>> [FAISS] Embeddings carregados | base={embeddings1.shape} | query={embeddings2.shape}",
+            flush=True,
+        )
 
     df1 = df1.copy().reset_index(drop=True)
     df2 = df2.copy().reset_index(drop=True)
@@ -171,8 +277,12 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
             continue
 
         k_efetivo = min(k, len(base_idx))
-        embeddings_base_mun = embeddings1[base_idx]
-        embeddings_query_mun = embeddings2[query_idx]
+        if use_partitioned_embeddings:
+            embeddings_base_mun = load_partitioned_embeddings("base", safe_model, id_municipio, len(base_idx))
+            embeddings_query_mun = load_partitioned_embeddings("query", safe_model, id_municipio, len(query_idx))
+        else:
+            embeddings_base_mun = embeddings1[base_idx]
+            embeddings_query_mun = embeddings2[query_idx]
 
         start_index_time = time.time()
         mem_before = process.memory_info().rss / (1024 ** 2)
@@ -310,13 +420,23 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     safe_model = safe_model_name(model)
 
-    print(f">>> [SVS] Carregando embeddings do modelo: {model}", flush=True)
-    embeddings1 = np.load(f"data/embeddings_base_{safe_model}.npy")
-    embeddings2 = np.load(f"data/embeddings_query_{safe_model}.npy")
-    print(
-        f">>> [SVS] Embeddings carregados | base={embeddings1.shape} | query={embeddings2.shape}",
-        flush=True,
-    )
+    use_partitioned_embeddings = has_partitioned_embeddings(safe_model)
+    embeddings1 = None
+    embeddings2 = None
+    if use_partitioned_embeddings:
+        print(
+            f">>> [SVS] Usando embeddings particionados em "
+            f"{get_partitioned_embeddings_dir('base', safe_model)} e "
+            f"{get_partitioned_embeddings_dir('query', safe_model)}",
+            flush=True,
+        )
+    else:
+        print(f">>> [SVS] Carregando embeddings do modelo: {model}", flush=True)
+        embeddings1, embeddings2 = load_flat_embeddings(safe_model)
+        print(
+            f">>> [SVS] Embeddings carregados | base={embeddings1.shape} | query={embeddings2.shape}",
+            flush=True,
+        )
 
     df1 = df1.copy().reset_index(drop=True)
     df2 = df2.copy().reset_index(drop=True)
@@ -342,8 +462,12 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
             continue
 
         k_efetivo = min(k, len(base_idx))
-        embeddings_base_mun = embeddings1[base_idx]
-        embeddings_query_mun = embeddings2[query_idx]
+        if use_partitioned_embeddings:
+            embeddings_base_mun = load_partitioned_embeddings("base", safe_model, id_municipio, len(base_idx))
+            embeddings_query_mun = load_partitioned_embeddings("query", safe_model, id_municipio, len(query_idx))
+        else:
+            embeddings_base_mun = embeddings1[base_idx]
+            embeddings_query_mun = embeddings2[query_idx]
 
         start_index_time = time.time()
         mem_before = process.memory_info().rss / (1024 ** 2)
@@ -490,12 +614,22 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     safe_model = safe_model_name(model)
 
-    embeddings1 = np.load(f"data/embeddings_base_{safe_model}.npy")
-    embeddings2 = np.load(f"data/embeddings_query_{safe_model}.npy")
+    use_partitioned_embeddings = has_partitioned_embeddings(safe_model)
+    embeddings1 = None
+    embeddings2 = None
+    if use_partitioned_embeddings:
+        print(
+            f">>> [HNSW Julia] Usando embeddings particionados em "
+            f"{get_partitioned_embeddings_dir('base', safe_model)} e "
+            f"{get_partitioned_embeddings_dir('query', safe_model)}",
+            flush=True,
+        )
+    else:
+        embeddings1, embeddings2 = load_flat_embeddings(safe_model)
 
-    # Normalizar (Julia HNSW geralmente trabalha com L2/cosseno)
-    embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
-    embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
+        # Normalizar (Julia HNSW geralmente trabalha com L2/cosseno)
+        embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
+        embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
 
     # ================================
     #     INDEXAÇÃO (HNSW em Julia)
@@ -528,8 +662,14 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
             continue
 
         k_efetivo = min(k, len(base_idx))
-        embeddings_base_mun = embeddings1[base_idx]
-        embeddings_query_mun = embeddings2[query_idx]
+        if use_partitioned_embeddings:
+            embeddings_base_mun = load_partitioned_embeddings("base", safe_model, id_municipio, len(base_idx))
+            embeddings_query_mun = load_partitioned_embeddings("query", safe_model, id_municipio, len(query_idx))
+            embeddings_base_mun = embeddings_base_mun / np.linalg.norm(embeddings_base_mun, axis=1, keepdims=True)
+            embeddings_query_mun = embeddings_query_mun / np.linalg.norm(embeddings_query_mun, axis=1, keepdims=True)
+        else:
+            embeddings_base_mun = embeddings1[base_idx]
+            embeddings_query_mun = embeddings2[query_idx]
 
         start_index_time = time.time()
         mem_before = process.memory_info().rss / (1024 ** 2)
@@ -667,12 +807,22 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     safe_model = safe_model_name(model)
 
-    embeddings1 = np.load(f"data/embeddings_base_{safe_model}.npy")
-    embeddings2 = np.load(f"data/embeddings_query_{safe_model}.npy")
+    use_partitioned_embeddings = has_partitioned_embeddings(safe_model)
+    embeddings1 = None
+    embeddings2 = None
+    if use_partitioned_embeddings:
+        print(
+            f">>> [NMSLIB] Usando embeddings particionados em "
+            f"{get_partitioned_embeddings_dir('base', safe_model)} e "
+            f"{get_partitioned_embeddings_dir('query', safe_model)}",
+            flush=True,
+        )
+    else:
+        embeddings1, embeddings2 = load_flat_embeddings(safe_model)
 
-    # Normalizar para cosinesimil
-    embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
-    embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
+        # Normalizar para cosinesimil
+        embeddings1 = embeddings1 / np.linalg.norm(embeddings1, axis=1, keepdims=True)
+        embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
 
     df1 = df1.copy().reset_index(drop=True)
     df2 = df2.copy().reset_index(drop=True)
@@ -697,8 +847,14 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
             continue
 
         k_efetivo = min(k, len(base_idx))
-        embeddings_base_mun = embeddings1[base_idx]
-        embeddings_query_mun = embeddings2[query_idx]
+        if use_partitioned_embeddings:
+            embeddings_base_mun = load_partitioned_embeddings("base", safe_model, id_municipio, len(base_idx))
+            embeddings_query_mun = load_partitioned_embeddings("query", safe_model, id_municipio, len(query_idx))
+            embeddings_base_mun = embeddings_base_mun / np.linalg.norm(embeddings_base_mun, axis=1, keepdims=True)
+            embeddings_query_mun = embeddings_query_mun / np.linalg.norm(embeddings_query_mun, axis=1, keepdims=True)
+        else:
+            embeddings_base_mun = embeddings1[base_idx]
+            embeddings_query_mun = embeddings2[query_idx]
 
         start_index_time = time.time()
         mem_before = process.memory_info().rss / (1024 ** 2)

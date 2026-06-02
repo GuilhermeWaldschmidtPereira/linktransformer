@@ -11,7 +11,22 @@ import pandas as pd
 THIS_DIR = os.path.dirname(__file__)
 REPO_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
 SRC_DIR = os.path.join(REPO_ROOT, "src")
-DATA_DIR = os.path.join(REPO_ROOT, "data")
+
+
+def get_data_dir_candidates() -> List[str]:
+    candidates = []
+    env_data_dir = os.environ.get("LINKTRANSFORMER_DATA_DIR")
+    if env_data_dir:
+        candidates.append(os.path.abspath(env_data_dir))
+    candidates.extend([
+        os.path.join(REPO_ROOT, "data"),
+        os.path.join(REPO_ROOT, "linktransformer", "data"),
+    ])
+    return list(dict.fromkeys(candidates))
+
+
+DATA_DIR_CANDIDATES = get_data_dir_candidates()
+DATA_DIR = DATA_DIR_CANDIDATES[0]
 
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
@@ -36,17 +51,34 @@ def safe_model_name(modelo: str) -> str:
 
 def assert_embeddings_exist(modelo: str) -> None:
     safe_model = safe_model_name(modelo)
-    paths = [
-        os.path.join(DATA_DIR, f"embeddings_base_{safe_model}.npy"),
-        os.path.join(DATA_DIR, f"embeddings_query_{safe_model}.npy"),
-    ]
-    missing_paths = [path for path in paths if not os.path.exists(path)]
-    if missing_paths:
-        missing = "\n".join(f"- {path}" for path in missing_paths)
+    flat_paths = []
+    partition_dirs = []
+    has_flat_embeddings = False
+    has_partitioned_embeddings = False
+
+    for data_dir in DATA_DIR_CANDIDATES:
+        candidate_flat_paths = [
+            os.path.join(data_dir, f"embeddings_base_{safe_model}.npy"),
+            os.path.join(data_dir, f"embeddings_query_{safe_model}.npy"),
+        ]
+        candidate_partition_dirs = [
+            os.path.join(data_dir, "base", safe_model),
+            os.path.join(data_dir, "query", safe_model),
+        ]
+        flat_paths.extend(candidate_flat_paths)
+        partition_dirs.extend(candidate_partition_dirs)
+        has_flat_embeddings = has_flat_embeddings or all(os.path.exists(path) for path in candidate_flat_paths)
+        has_partitioned_embeddings = has_partitioned_embeddings or all(
+            os.path.isdir(path) and any(name.endswith(".npy") for name in os.listdir(path))
+            for path in candidate_partition_dirs
+        )
+
+    if not has_flat_embeddings and not has_partitioned_embeddings:
+        expected = "\n".join(f"- {path}" for path in flat_paths + partition_dirs)
         raise FileNotFoundError(
             "Embeddings pre-computados não encontrados para o ScaNN. "
             "Execute primeiro o script isolado de embeddings.\n"
-            f"{missing}"
+            f"{expected}"
         )
 
 

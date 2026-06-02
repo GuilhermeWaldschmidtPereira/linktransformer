@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE_LINKTRANSFORMER="${LINKTRANSFORMER_IMAGE:-localhost/projeto-mestrado-linktransformer:latest}"
 IMAGE_SCANN="${SCANN_IMAGE:-localhost/projeto-mestrado-scann:latest}"
+CONTAINER_DATA_DIR="${LINKTRANSFORMER_DATA_DIR:-/workspace/data}"
 RESULTS_DIR_NAME="resultados_$(date +%d%m%Y%H%M%S)"
 RESULTS_DIR="$SCRIPT_DIR/$RESULTS_DIR_NAME"
 CONTAINER_RESULTS_DIR="/workspace/$RESULTS_DIR_NAME"
@@ -20,6 +21,7 @@ mkdir -p "$RESULTS_DIR"
 touch "$RESULTS_DIR/resultados.csv"
 
 echo ">>> Resultados desta execução serão salvos em: $RESULTS_DIR"
+echo ">>> Embeddings serão lidos em: $CONTAINER_DATA_DIR"
 echo "metodo,modelo_embedding,index_time,search_time,total_time,num_rows_df1,num_rows_df2,k,mem_used_indexation_MB,avg_mem_used_search_MB,matches" > "$RESULTS_DIR/resultados.csv"
 
 ########################################
@@ -31,6 +33,7 @@ podman run --rm \
   --userns=keep-id \
   --user "$(id -u):$(id -g)" \
   -e LINKTRANSFORMER_RESULTS_DIR="$CONTAINER_RESULTS_DIR" \
+  -e LINKTRANSFORMER_DATA_DIR="$CONTAINER_DATA_DIR" \
   -v "${PROJECT_ROOT}:/workspace:Z" \
   -w /workspace \
   "${IMAGE_LINKTRANSFORMER}" \
@@ -41,6 +44,7 @@ podman run --rm \
   --userns=keep-id \
   --user "$(id -u):$(id -g)" \
   -e LINKTRANSFORMER_RESULTS_DIR="$CONTAINER_RESULTS_DIR" \
+  -e LINKTRANSFORMER_DATA_DIR="$CONTAINER_DATA_DIR" \
   -v "${PROJECT_ROOT}:/workspace:Z" \
   -w /workspace \
   "${IMAGE_LINKTRANSFORMER}" \
@@ -51,6 +55,7 @@ podman run --rm \
   --userns=keep-id \
   --user "$(id -u):$(id -g)" \
   -e LINKTRANSFORMER_RESULTS_DIR="$CONTAINER_RESULTS_DIR" \
+  -e LINKTRANSFORMER_DATA_DIR="$CONTAINER_DATA_DIR" \
   -v "${PROJECT_ROOT}:/workspace:Z" \
   -w /workspace \
   "${IMAGE_LINKTRANSFORMER}" \
@@ -61,6 +66,7 @@ podman run --rm \
   --userns=keep-id \
   --user "$(id -u):$(id -g)" \
   -e LINKTRANSFORMER_RESULTS_DIR="$CONTAINER_RESULTS_DIR" \
+  -e LINKTRANSFORMER_DATA_DIR="$CONTAINER_DATA_DIR" \
   -e SCANN_BUILDER_MODE \
   -e SCANN_NUM_EXECUCOES \
   -e SCANN_QUERY_BATCH_SIZE \
