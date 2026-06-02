@@ -6,19 +6,21 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE_LINKTRANSFORMER="${LINKTRANSFORMER_IMAGE:-localhost/projeto-mestrado-linktransformer:latest}"
 IMAGE_SCANN="${SCANN_IMAGE:-localhost/projeto-mestrado-scann:latest}"
+RESULTS_DIR_NAME="resultados_$(date +%d%m%Y%H%M%S)"
+RESULTS_DIR="$SCRIPT_DIR/$RESULTS_DIR_NAME"
+CONTAINER_RESULTS_DIR="/workspace/$RESULTS_DIR_NAME"
 
 if ! command -v podman >/dev/null 2>&1; then
   echo "Erro: podman não está instalado ou não está disponível no PATH." >&2
   exit 1
 fi
 
-# Criar o resultados.csv no mesmo diretório do script
-rm -f "$SCRIPT_DIR/resultados.csv"
-touch "$SCRIPT_DIR/resultados.csv"
-rm -f "$SCRIPT_DIR/resultados_por_municipio.csv"
-rm -rf "$SCRIPT_DIR/resultados_por_municipio"
+# Criar uma pasta de resultados por execução para manter rastreabilidade.
+mkdir -p "$RESULTS_DIR"
+touch "$RESULTS_DIR/resultados.csv"
 
-echo "metodo,modelo_embedding,index_time,search_time,total_time,num_rows_df1,num_rows_df2,k,mem_used_indexation_MB,avg_mem_used_search_MB,matches" > "$SCRIPT_DIR/resultados.csv"
+echo ">>> Resultados desta execução serão salvos em: $RESULTS_DIR"
+echo "metodo,modelo_embedding,index_time,search_time,total_time,num_rows_df1,num_rows_df2,k,mem_used_indexation_MB,avg_mem_used_search_MB,matches" > "$RESULTS_DIR/resultados.csv"
 
 ########################################
 # Podman - LinkTransformer sem ScaNN
@@ -28,6 +30,7 @@ echo ">>> Rodando LinkTransformer sem ScaNN via Podman..."
 podman run --rm \
   --userns=keep-id \
   --user "$(id -u):$(id -g)" \
+  -e LINKTRANSFORMER_RESULTS_DIR="$CONTAINER_RESULTS_DIR" \
   -v "${PROJECT_ROOT}:/workspace:Z" \
   -w /workspace \
   "${IMAGE_LINKTRANSFORMER}" \
@@ -37,6 +40,7 @@ echo ">>> Rodando NMSLIB via Podman..."
 podman run --rm \
   --userns=keep-id \
   --user "$(id -u):$(id -g)" \
+  -e LINKTRANSFORMER_RESULTS_DIR="$CONTAINER_RESULTS_DIR" \
   -v "${PROJECT_ROOT}:/workspace:Z" \
   -w /workspace \
   "${IMAGE_LINKTRANSFORMER}" \
@@ -46,6 +50,7 @@ echo ">>> Rodando HNSW Julia via Podman..."
 podman run --rm \
   --userns=keep-id \
   --user "$(id -u):$(id -g)" \
+  -e LINKTRANSFORMER_RESULTS_DIR="$CONTAINER_RESULTS_DIR" \
   -v "${PROJECT_ROOT}:/workspace:Z" \
   -w /workspace \
   "${IMAGE_LINKTRANSFORMER}" \
@@ -55,6 +60,7 @@ echo ">>> Rodando ScaNN via Podman (imagem dedicada)..."
 podman run --rm \
   --userns=keep-id \
   --user "$(id -u):$(id -g)" \
+  -e LINKTRANSFORMER_RESULTS_DIR="$CONTAINER_RESULTS_DIR" \
   -e SCANN_BUILDER_MODE \
   -e SCANN_NUM_EXECUCOES \
   -e SCANN_QUERY_BATCH_SIZE \

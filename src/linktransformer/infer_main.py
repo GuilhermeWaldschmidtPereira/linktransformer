@@ -21,7 +21,14 @@ from transformers import TrainingArguments, Trainer
 from linktransformer.main_svs import VamanaIndexer
 import time
 
-PATH_RESULTADOS = os.path.join(os.path.dirname(__file__), "resultados")
+def build_results_dir() -> str:
+    results_dir = os.environ.get("LINKTRANSFORMER_RESULTS_DIR")
+    if results_dir:
+        return os.path.abspath(results_dir)
+    return os.path.abspath(f"resultados_{time.strftime('%d%m%Y%H%M%S')}")
+
+
+PATH_RESULTADOS = build_results_dir()
 
 NUM_EXECUCOES_BUSCA = 1
 
@@ -30,8 +37,8 @@ if not os.path.exists(PATH_RESULTADOS):
 
 NAME_DF_RESULTADOS_GERAL = "resultados_geral.csv"
 PATH_RESULTADOS_GERAL = os.path.join(PATH_RESULTADOS, NAME_DF_RESULTADOS_GERAL)
-PATH_RESULTADOS_POR_MUNICIPIO_DIR = "resultados_por_municipio"
-PATH_RESULTADOS_POR_MUNICIPIO = "resultados_por_municipio.csv"
+PATH_RESULTADOS_POR_MUNICIPIO_DIR = os.path.join(PATH_RESULTADOS, "resultados_por_municipio")
+PATH_RESULTADOS_POR_MUNICIPIO = os.path.join(PATH_RESULTADOS, "resultados_por_municipio.csv")
 
 RESULTADOS_POR_MUNICIPIO_COLUMNS = [
     "metodo",
@@ -42,6 +49,9 @@ RESULTADOS_POR_MUNICIPIO_COLUMNS = [
     "total_time",
     "num_rows_df1",
     "num_rows_df2",
+    "quantidade_enderecos_por_municipio",
+    "quantidade_enderecos_buscados_municipio",
+    "quantidade_acertos_municipio",
     "k",
     "k_efetivo",
     "mem_used_indexation_MB",
@@ -213,6 +223,9 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
             "total_time": index_time + avg_search_time,
             "num_rows_df1": len(base_idx),
             "num_rows_df2": len(query_idx),
+            "quantidade_enderecos_por_municipio": len(base_idx),
+            "quantidade_enderecos_buscados_municipio": len(query_idx),
+            "quantidade_acertos_municipio": matches,
             "k": k,
             "k_efetivo": k_efetivo,
             "mem_used_indexation_MB": mem_used_create_index,
@@ -234,7 +247,7 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
         f"right: {None}{suffixes[1]}"
     )
 
-    PATH_RESULTADOS_baseline = f"resultados/baseline/{safe_model}"
+    PATH_RESULTADOS_baseline = os.path.join(PATH_RESULTADOS, "baseline", safe_model)
 
     # ================================
     #   SALVAR RESULTADOS DE TEMPO
@@ -256,9 +269,9 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     # ================================
     #   SALVAR MÉDIAS DOS RESULTADOS
     # ================================
-    results_file = "resultados.csv"
+    results_file = os.path.join(PATH_RESULTADOS, "resultados.csv")
     total_time = total_index_time + total_search_time
-    df_lm_matched.to_csv('teste.csv', index=False)
+    df_lm_matched.to_csv(os.path.join(PATH_RESULTADOS, "teste.csv"), index=False)
     matches = count_setor_matches(df_lm_matched)
     results_data = {
         "metodo": ["baseline"],
@@ -389,6 +402,9 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
             "total_time": index_time + avg_search_time,
             "num_rows_df1": len(base_idx),
             "num_rows_df2": len(query_idx),
+            "quantidade_enderecos_por_municipio": len(base_idx),
+            "quantidade_enderecos_buscados_municipio": len(query_idx),
+            "quantidade_acertos_municipio": matches,
             "k": k,
             "k_efetivo": k_efetivo,
             "mem_used_indexation_MB": mem_used_create_index,
@@ -413,14 +429,14 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     df_aux = pd.concat([df_aux, df_tempos_busca_svs], ignore_index=True)
     df_aux.to_csv(PATH_RESULTADOS_GERAL, index=False)
 
-    df_lm_matched.to_csv(f"df_lm_matched_svs.csv", index=False)
+    df_lm_matched.to_csv(os.path.join(PATH_RESULTADOS, "df_lm_matched_svs.csv"), index=False)
 
     print(
         f"LM matched (SVS) - left: {None}{suffixes[0]}, "
         f"right: {None}{suffixes[1]}"
     )
 
-    PATH_RESULTADOS_SVS = f"resultados/svs/{safe_model}"
+    PATH_RESULTADOS_SVS = os.path.join(PATH_RESULTADOS, "svs", safe_model)
 
     # ================================
     #   SALVAR RESULTADOS DE TEMPO
@@ -434,7 +450,7 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     #   SALVAR MÉDIAS DOS RESULTADOS
     # ================================
-    results_file = "resultados.csv"
+    results_file = os.path.join(PATH_RESULTADOS, "resultados.csv")
     total_time = total_index_time + total_search_time
     matches = count_setor_matches(df_lm_matched)
     results_data = {
@@ -563,6 +579,9 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
             "total_time": index_time + avg_search_time,
             "num_rows_df1": len(base_idx),
             "num_rows_df2": len(query_idx),
+            "quantidade_enderecos_por_municipio": len(base_idx),
+            "quantidade_enderecos_buscados_municipio": len(query_idx),
+            "quantidade_acertos_municipio": matches,
             "k": k,
             "k_efetivo": k_efetivo,
             "mem_used_indexation_MB": mem_used_create_index,
@@ -592,7 +611,7 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
         f"right: {None}{suffixes[1]}"
     )
 
-    PATH_RESULTADOS_hnsw_julia = f"resultados/hnsw_julia/{safe_model}"
+    PATH_RESULTADOS_hnsw_julia = os.path.join(PATH_RESULTADOS, "hnsw_julia", safe_model)
 
     # ================================
     #   SALVAR RESULTADOS DE TEMPO
@@ -606,7 +625,7 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     #   SALVAR MÉDIAS DOS RESULTADOS
     # ================================
-    results_file = "resultados.csv"
+    results_file = os.path.join(PATH_RESULTADOS, "resultados.csv")
     total_time = total_index_time + total_search_time
     matches = count_setor_matches(df_lm_matched)
     results_data = {
@@ -745,6 +764,9 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
             "total_time": index_time + avg_search_time,
             "num_rows_df1": len(base_idx),
             "num_rows_df2": len(query_idx),
+            "quantidade_enderecos_por_municipio": len(base_idx),
+            "quantidade_enderecos_buscados_municipio": len(query_idx),
+            "quantidade_acertos_municipio": matches,
             "k": k,
             "k_efetivo": k_efetivo,
             "mem_used_indexation_MB": mem_used_create_index,
@@ -775,7 +797,7 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
         f"right: {None}{suffixes[1]}"
     )
 
-    PATH_RESULTADOS_NMSLIB = f"resultados/NMSLIB/{safe_model}"
+    PATH_RESULTADOS_NMSLIB = os.path.join(PATH_RESULTADOS, "NMSLIB", safe_model)
 
     # ================================
     #   SALVAR RESULTADOS DE TEMPO
@@ -789,7 +811,7 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     # ================================
     #   SALVAR MÉDIAS DOS RESULTADOS
     # ================================
-    results_file = "resultados.csv"
+    results_file = os.path.join(PATH_RESULTADOS, "resultados.csv")
     total_time = total_index_time + total_search_time
     matches = count_setor_matches(df_lm_matched)
     results_data = {
@@ -903,7 +925,7 @@ def merge_knn_scann(k, df1, df2, suffixes) -> DataFrame:
     # ================================
     #   SALVAR RESULTADOS DE TEMPO
     # ================================
-    results_file = "resultados.csv"
+    results_file = os.path.join(PATH_RESULTADOS, "resultados.csv")
     total_time = index_time + avg_search_time
 
     results_data = {

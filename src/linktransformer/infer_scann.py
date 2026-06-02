@@ -12,15 +12,22 @@ import psutil
 
 from linktransformer.utils import *
 
-PATH_RESULTADOS = os.path.join(os.path.dirname(__file__), "resultados")
+def build_results_dir() -> str:
+    results_dir = os.environ.get("LINKTRANSFORMER_RESULTS_DIR")
+    if results_dir:
+        return os.path.abspath(results_dir)
+    return os.path.abspath(f"resultados_{time.strftime('%d%m%Y%H%M%S')}")
+
+
+PATH_RESULTADOS = build_results_dir()
 
 if not os.path.exists(PATH_RESULTADOS):
     os.makedirs(PATH_RESULTADOS)
 
 NAME_DF_resultados_scann = "resultados_scann.csv"
 PATH_resultados_scann = os.path.join(PATH_RESULTADOS, NAME_DF_resultados_scann)
-PATH_RESULTADOS_POR_MUNICIPIO_DIR = "resultados_por_municipio"
-PATH_RESULTADOS_POR_MUNICIPIO = "resultados_por_municipio.csv"
+PATH_RESULTADOS_POR_MUNICIPIO_DIR = os.path.join(PATH_RESULTADOS, "resultados_por_municipio")
+PATH_RESULTADOS_POR_MUNICIPIO = os.path.join(PATH_RESULTADOS, "resultados_por_municipio.csv")
 
 RESULTADOS_POR_MUNICIPIO_COLUMNS = [
     "metodo",
@@ -31,6 +38,9 @@ RESULTADOS_POR_MUNICIPIO_COLUMNS = [
     "total_time",
     "num_rows_df1",
     "num_rows_df2",
+    "quantidade_enderecos_por_municipio",
+    "quantidade_enderecos_buscados_municipio",
+    "quantidade_acertos_municipio",
     "k",
     "k_efetivo",
     "mem_used_indexation_MB",
@@ -189,7 +199,7 @@ def merge_knn_scann(
 ) -> DataFrame:
     safe_model = safe_model_name(model)
 
-    PATH_RESULTADOS_scann = f"resultados/scann/{safe_model}"
+    PATH_RESULTADOS_scann = os.path.join(PATH_RESULTADOS, "scann", safe_model)
     embeddings_base_path = f"data/embeddings_base_{safe_model}.npy"
     embeddings_query_path = f"data/embeddings_query_{safe_model}.npy"
 
@@ -323,6 +333,9 @@ def merge_knn_scann(
             "total_time": index_time + avg_search_time,
             "num_rows_df1": len(base_idx),
             "num_rows_df2": len(query_idx),
+            "quantidade_enderecos_por_municipio": len(base_idx),
+            "quantidade_enderecos_buscados_municipio": len(query_idx),
+            "quantidade_acertos_municipio": matches,
             "k": k,
             "k_efetivo": k_efetivo,
             "mem_used_indexation_MB": mem_used_create_index,
@@ -379,7 +392,7 @@ def merge_knn_scann(
 
     results_df = pd.DataFrame(results_data)
 
-    results_file = "resultados.csv"
+    results_file = os.path.join(PATH_RESULTADOS, "resultados.csv")
     print(f">>> [ScaNN] Atualizando resumo final em {results_file}", flush=True)
 
     if os.path.exists(results_file):
