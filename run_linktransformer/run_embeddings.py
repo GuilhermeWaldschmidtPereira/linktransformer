@@ -494,9 +494,7 @@ def get_municipality_output_dir(
     multiple_models: bool,
 ) -> str:
     side_output_dir = os.path.join(output_dir, side)
-    if multiple_models:
-        return os.path.join(side_output_dir, safe_model_name(model_name))
-    return side_output_dir
+    return os.path.join(side_output_dir, safe_model_name(model_name))
 
 
 def get_municipality_output_path(

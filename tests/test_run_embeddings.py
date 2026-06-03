@@ -133,7 +133,7 @@ def test_get_municipality_output_path_uses_side_directory_and_requested_name(tmp
         multiple_models=False,
     )
 
-    assert path == os.path.join(str(tmp_path), "base", "embedding_base_123.npy")
+    assert path == os.path.join(str(tmp_path), "base", "model_a", "embedding_base_123.npy")
 
 
 def test_get_municipality_output_path_separates_multiple_models(tmp_path):
