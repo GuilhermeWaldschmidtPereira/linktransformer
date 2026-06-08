@@ -9,6 +9,6 @@ echo ">>> Ativando venv_scann..."
 source "${VENV_SCANN}/bin/activate"
 
 echo ">>> Rodando ScaNN..."
-python "${PROJECT_ROOT}/run_linktransformer/main_scann.py"
+python "${PROJECT_ROOT}/run_linktransformer/main_scann.py" "$@"
 
 echo ">>> FIM do experimento ScaNN."

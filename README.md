@@ -144,6 +144,22 @@ O `main.sh`:
 - roda `main_hnsw_julia.py`
 - roda `main_scann.py`
 
+Por padrão, a indexação roda todos os modelos de embedding configurados. Para rodar apenas um modelo:
+
+```bash
+./main.sh --model sentence-transformers/all-MiniLM-L6-v2
+```
+
+Para rodar um subconjunto, repita `--model`:
+
+```bash
+./main.sh \
+  --model sentence-transformers/all-MiniLM-L6-v2 \
+  --model sentence-transformers/all-mpnet-base-v2
+```
+
+Também é aceito o nome sanitizado usado nos arquivos `.npy`, por exemplo `sentence-transformers_all-MiniLM-L6-v2`. Para deixar explícito que quer todos os modelos, use `--model all`.
+
 ## Execuções individuais com Podman
 
 Antes de rodar individualmente, garanta que:
@@ -177,7 +193,8 @@ podman run --rm \
   -v "${PROJECT_ROOT}:/workspace:Z" \
   -w /workspace \
   "${IMAGE_LINKTRANSFORMER}" \
-  python /workspace/run_linktransformer/main_linktransformer.py
+  python /workspace/run_linktransformer/main_linktransformer.py \
+    --model sentence-transformers/all-MiniLM-L6-v2
 ```
 
 ### 2. NMSLIB
@@ -189,7 +206,8 @@ podman run --rm \
   -v "${PROJECT_ROOT}:/workspace:Z" \
   -w /workspace \
   "${IMAGE_LINKTRANSFORMER}" \
-  python /workspace/run_linktransformer/main_nmslib_runner.py
+  python /workspace/run_linktransformer/main_nmslib_runner.py \
+    --model sentence-transformers/all-MiniLM-L6-v2
 ```
 
 ### 3. HNSW Julia
@@ -201,7 +219,8 @@ podman run --rm \
   -v "${PROJECT_ROOT}:/workspace:Z" \
   -w /workspace \
   "${IMAGE_LINKTRANSFORMER}" \
-  python-jl /workspace/run_linktransformer/main_hnsw_julia.py
+  python-jl /workspace/run_linktransformer/main_hnsw_julia.py \
+    --model sentence-transformers/all-MiniLM-L6-v2
 ```
 
 ### 4. ScaNN
@@ -215,7 +234,8 @@ podman run --rm \
   -v "${PROJECT_ROOT}:/workspace:Z" \
   -w /workspace \
   "${IMAGE_SCANN}" \
-  python /workspace/run_linktransformer/main_scann.py
+  python /workspace/run_linktransformer/main_scann.py \
+    --model sentence-transformers/all-MiniLM-L6-v2
 ```
 
 Exemplo com variáveis de ambiente do ScaNN:

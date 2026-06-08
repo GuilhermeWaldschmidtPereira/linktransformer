@@ -37,7 +37,7 @@ podman run --rm \
   -v "${PROJECT_ROOT}:/workspace:Z" \
   -w /workspace \
   "${IMAGE_LINKTRANSFORMER}" \
-  python /workspace/run_linktransformer/main_linktransformer.py
+  python /workspace/run_linktransformer/main_linktransformer.py "$@"
 
 echo ">>> Rodando NMSLIB via Podman..."
 podman run --rm \
@@ -48,7 +48,7 @@ podman run --rm \
   -v "${PROJECT_ROOT}:/workspace:Z" \
   -w /workspace \
   "${IMAGE_LINKTRANSFORMER}" \
-  python /workspace/run_linktransformer/main_nmslib_runner.py
+  python /workspace/run_linktransformer/main_nmslib_runner.py "$@"
 
 echo ">>> Rodando HNSW Julia via Podman..."
 podman run --rm \
@@ -59,7 +59,7 @@ podman run --rm \
   -v "${PROJECT_ROOT}:/workspace:Z" \
   -w /workspace \
   "${IMAGE_LINKTRANSFORMER}" \
-  python-jl /workspace/run_linktransformer/main_hnsw_julia.py
+  python-jl /workspace/run_linktransformer/main_hnsw_julia.py "$@"
 
 echo ">>> Rodando ScaNN via Podman (imagem dedicada)..."
 podman run --rm \
@@ -81,7 +81,7 @@ podman run --rm \
   -v "${PROJECT_ROOT}:/workspace:Z" \
   -w /workspace \
   "${IMAGE_SCANN}" \
-  python /workspace/run_linktransformer/main_scann.py
+  python /workspace/run_linktransformer/main_scann.py "$@"
 
 
 echo ">>> FIM de todos os experimentos."

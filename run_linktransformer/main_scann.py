@@ -32,21 +32,12 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from linktransformer.infer_scann import merge_knn_scann  # noqa: E402
-
-
-MODELOS_A_UTILIZAR: List[str] = [
-    "sentence-transformers/all-MiniLM-L6-v2",
-    "sentence-transformers/all-mpnet-base-v2",
-    # "intfloat/multilingual-e5-large",
-    # "neuralmind/bert-large-portuguese-cased",
-]
-
-
-def safe_model_name(modelo: str) -> str:
-    safe_model = str(modelo).replace(os.sep, "_")
-    if os.path.altsep:
-        safe_model = safe_model.replace(os.path.altsep, "_")
-    return safe_model
+from model_selection import (  # noqa: E402
+    MODELOS_A_UTILIZAR,
+    parse_embedding_model_args,
+    resolve_embedding_models,
+    safe_model_name,
+)
 
 
 def assert_embeddings_exist(modelo: str) -> None:
@@ -156,8 +147,14 @@ def prepare_dataframes(df_base: pd.DataFrame, df_query: pd.DataFrame):
 
 
 def main() -> None:
+    args = parse_embedding_model_args(
+        "Executa a indexacao ScaNN com embeddings pre-computados.",
+    )
+    modelos_a_executar = resolve_embedding_models(args.models)
+
     print(f">>> Script em execução: {__file__}", flush=True)
-    print(f">>> Modelos configurados: {MODELOS_A_UTILIZAR}", flush=True)
+    print(f">>> Modelos disponiveis: {MODELOS_A_UTILIZAR}", flush=True)
+    print(f">>> Modelos selecionados: {modelos_a_executar}", flush=True)
 
     try:
         df_base, df_query = load_input_data()
@@ -166,7 +163,7 @@ def main() -> None:
         # Mantém o comportamento anterior de range(2) com i > 0, que executava apenas k=1.
         ks = [1]
 
-        for modelo in MODELOS_A_UTILIZAR:
+        for modelo in modelos_a_executar:
             print(f">>> Iniciando processamento do modelo: {modelo}", flush=True)
             assert_embeddings_exist(modelo)
             df1, df2 = prepare_dataframes(df_base, df_query)
