@@ -160,6 +160,23 @@ Para rodar um subconjunto, repita `--model`:
 
 Também é aceito o nome sanitizado usado nos arquivos `.npy`, por exemplo `sentence-transformers_all-MiniLM-L6-v2`. Para deixar explícito que quer todos os modelos, use `--model all`.
 
+Por padrão, o pipeline roda no escopo por município, criando um índice por
+`id_municipio`/`municipio`. Para rodar a versão geral, com um único índice para
+toda a base e consulta sobre toda a query:
+
+```bash
+./main.sh --scope geral --model sentence-transformers/all-MiniLM-L6-v2
+```
+
+Para rodar explicitamente a versão por município:
+
+```bash
+./main.sh --scope municipio --model sentence-transformers/all-MiniLM-L6-v2
+```
+
+O modo `--scope geral` precisa dos embeddings consolidados em `data/`, por
+exemplo `embeddings_base_<modelo>.npy` e `embeddings_query_<modelo>.npy`.
+
 ## Execuções individuais com Podman
 
 Antes de rodar individualmente, garanta que:

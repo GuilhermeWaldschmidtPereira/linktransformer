@@ -31,7 +31,7 @@ DATA_DIR = DATA_DIR_CANDIDATES[0]
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from linktransformer.infer_scann import merge_knn_scann  # noqa: E402
+from linktransformer.infer_scann import merge_knn_scann, merge_knn_scann_global  # noqa: E402
 from model_selection import (  # noqa: E402
     MODELOS_A_UTILIZAR,
     parse_embedding_model_args,
@@ -40,7 +40,7 @@ from model_selection import (  # noqa: E402
 )
 
 
-def assert_embeddings_exist(modelo: str) -> None:
+def assert_embeddings_exist(modelo: str, scope: str = "municipio") -> None:
     safe_model = safe_model_name(modelo)
     flat_paths = []
     partition_dirs = []
@@ -64,7 +64,15 @@ def assert_embeddings_exist(modelo: str) -> None:
             for path in candidate_partition_dirs
         )
 
-    if not has_flat_embeddings and not has_partitioned_embeddings:
+    if scope == "geral" and not has_flat_embeddings:
+        expected = "\n".join(f"- {path}" for path in flat_paths)
+        raise FileNotFoundError(
+            "Embeddings globais pre-computados não encontrados para o ScaNN. "
+            "Execute primeiro a geração de embeddings com merge das partições.\n"
+            f"{expected}"
+        )
+
+    if scope == "municipio" and not has_flat_embeddings and not has_partitioned_embeddings:
         expected = "\n".join(f"- {path}" for path in flat_paths + partition_dirs)
         raise FileNotFoundError(
             "Embeddings pre-computados não encontrados para o ScaNN. "
@@ -155,6 +163,7 @@ def main() -> None:
     print(f">>> Script em execução: {__file__}", flush=True)
     print(f">>> Modelos disponiveis: {MODELOS_A_UTILIZAR}", flush=True)
     print(f">>> Modelos selecionados: {modelos_a_executar}", flush=True)
+    print(f">>> Escopo selecionado: {args.scope}", flush=True)
 
     try:
         df_base, df_query = load_input_data()
@@ -165,16 +174,19 @@ def main() -> None:
 
         for modelo in modelos_a_executar:
             print(f">>> Iniciando processamento do modelo: {modelo}", flush=True)
-            assert_embeddings_exist(modelo)
+            assert_embeddings_exist(modelo, args.scope)
             df1, df2 = prepare_dataframes(df_base, df_query)
 
             for k in ks:
-                print(f">>> Rodando ScaNN | modelo={modelo} | k={k}", flush=True)
+                print(f">>> Rodando ScaNN | modelo={modelo} | k={k} | scope={args.scope}", flush=True)
                 print(
                     f">>> Tamanhos dos dataframes: df1={len(df1)} linhas | df2={len(df2)} linhas",
                     flush=True,
                 )
-                merge_knn_scann(k, df1, df2, suffixes, modelo)
+                if args.scope == "geral":
+                    merge_knn_scann_global(k, df1, df2, suffixes, modelo)
+                else:
+                    merge_knn_scann(k, df1, df2, suffixes, modelo)
     except Exception as exc:
         print(f">>> ERRO em main_scann.py: {type(exc).__name__}: {exc}", flush=True)
         traceback.print_exc(file=sys.stdout)

@@ -73,5 +73,13 @@ def parse_embedding_model_args(
             "Se omitido, roda todos. Tambem aceita: all, todos ou *."
         ),
     )
+    parser.add_argument(
+        "--scope",
+        choices=("municipio", "geral"),
+        default="municipio",
+        help=(
+            "Escopo da indexacao/consulta. 'municipio' recria o comportamento atual, "
+            "com um indice por municipio. 'geral' cria um indice unico para toda a base."
+        ),
+    )
     return parser.parse_args(argv)
-

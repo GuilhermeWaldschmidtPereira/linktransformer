@@ -229,6 +229,359 @@ def count_setor_matches(df_lm_matched: DataFrame) -> int:
         return int((df_lm_matched["setor_censitario_x"] == df_lm_matched["setor_censitario_y"]).sum())
     return 0
 
+
+def build_matches_global(
+    df_base: DataFrame,
+    df_query: DataFrame,
+    I: np.ndarray,
+    k_efetivo: int,
+    suffixes: Tuple[str, str],
+    scores: Optional[np.ndarray] = None,
+) -> DataFrame:
+    df_query_expanded = df_query.loc[
+        np.repeat(df_query.index.values, k_efetivo)
+    ].reset_index(drop=True)
+    df_base_expanded = df_base.iloc[I.flatten()].reset_index(drop=True)
+
+    df_lm_matched = df_query_expanded.merge(
+        df_base_expanded,
+        left_index=True,
+        right_index=True,
+        how="inner",
+        suffixes=suffixes,
+    )
+
+    if scores is not None:
+        df_lm_matched["score"] = scores.flatten()
+
+    return df_lm_matched
+
+
+def normalize_embeddings(embeddings: np.ndarray) -> np.ndarray:
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    return embeddings / norms
+
+
+def load_global_embeddings(safe_model: str, normalize: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+    embeddings_base, embeddings_query = load_flat_embeddings(safe_model)
+    if normalize:
+        embeddings_base = normalize_embeddings(embeddings_base)
+        embeddings_query = normalize_embeddings(embeddings_query)
+    return embeddings_base, embeddings_query
+
+
+def save_global_outputs(
+    metodo: str,
+    modelo_embedding: str,
+    safe_model: str,
+    df_base: DataFrame,
+    df_query: DataFrame,
+    k: int,
+    index_time: float,
+    avg_search_time: float,
+    mem_used_create_index: float,
+    avg_mem_used_search: float,
+    detailed_rows: Dict[str, List[Any]],
+    df_lm_matched: DataFrame,
+    result_subdir: str,
+    modelo_index: str,
+    matched_filename: str,
+) -> None:
+    df_tempos = pd.DataFrame(detailed_rows)
+    df_tempos["modelo_index"] = modelo_index
+    df_tempos["modelo_embedding"] = modelo_embedding
+
+    df_aux = pd.read_csv(PATH_RESULTADOS_GERAL)
+    df_aux = pd.concat([df_aux, df_tempos], ignore_index=True)
+    df_aux.to_csv(PATH_RESULTADOS_GERAL, index=False)
+
+    path_resultados_metodo = os.path.join(PATH_RESULTADOS, result_subdir, safe_model)
+    os.makedirs(path_resultados_metodo, exist_ok=True)
+    df_tempos.to_csv(
+        os.path.join(path_resultados_metodo, "csv_final_tempos_buscas.csv"),
+        index=False,
+    )
+    df_lm_matched.to_csv(os.path.join(PATH_RESULTADOS, matched_filename), index=False)
+
+    results_file = os.path.join(PATH_RESULTADOS, "resultados.csv")
+    results_df = pd.DataFrame({
+        "metodo": [metodo],
+        "modelo_embedding": [modelo_embedding],
+        "index_time": [index_time],
+        "search_time": [avg_search_time],
+        "total_time": [index_time + avg_search_time],
+        "num_rows_df1": [len(df_base)],
+        "num_rows_df2": [len(df_query)],
+        "k": [k],
+        "mem_used_indexation_MB": [mem_used_create_index],
+        "avg_mem_used_search_MB": [avg_mem_used_search],
+        "matches": [count_setor_matches(df_lm_matched)],
+    })
+
+    if os.path.exists(results_file):
+        results_df.to_csv(results_file, mode="a", header=False, index=False)
+    else:
+        results_df.to_csv(results_file, mode="w", header=True, index=False)
+
+
+def merge_knn_global(k, df1, df2, suffixes, model) -> DataFrame:
+    safe_model = safe_model_name(model)
+    print(f">>> [FAISS] Carregando embeddings globais do modelo: {model}", flush=True)
+    embeddings_base, embeddings_query = load_global_embeddings(safe_model)
+    print(
+        f">>> [FAISS] Embeddings carregados | base={embeddings_base.shape} | query={embeddings_query.shape}",
+        flush=True,
+    )
+
+    df1 = df1.copy().reset_index(drop=True)
+    df2 = df2.copy().reset_index(drop=True)
+    k_efetivo = min(k, len(df1))
+    process = psutil.Process(os.getpid())
+
+    mem_before = process.memory_info().rss / (1024 ** 2)
+    start_index_time = time.time()
+    index = faiss.IndexFlatIP(embeddings_base.shape[1])
+    index.add(embeddings_base)
+    index_time = time.time() - start_index_time
+    mem_after = process.memory_info().rss / (1024 ** 2)
+    mem_used_create_index = mem_after - mem_before
+
+    detailed_rows = {"execucao": [], "tempo_busca": [], "memoria_usada_busca_MB": []}
+    soma_tempo_busca = 0.0
+    soma_memoria_busca = 0.0
+    D = None
+    I = None
+    for i in range(NUM_EXECUCOES_BUSCA):
+        mem_before = process.memory_info().rss / (1024 ** 2)
+        start_search_time = time.time()
+        D, I = index.search(embeddings_query, k_efetivo)
+        search_time = time.time() - start_search_time
+        mem_after = process.memory_info().rss / (1024 ** 2)
+        mem_used_search = mem_after - mem_before
+        soma_tempo_busca += search_time
+        soma_memoria_busca += mem_used_search
+        detailed_rows["execucao"].append(i + 1)
+        detailed_rows["tempo_busca"].append(search_time)
+        detailed_rows["memoria_usada_busca_MB"].append(mem_used_search)
+
+    avg_search_time = soma_tempo_busca / NUM_EXECUCOES_BUSCA
+    avg_mem_used_search = soma_memoria_busca / NUM_EXECUCOES_BUSCA
+    df_lm_matched = build_matches_global(df1, df2, I, k_efetivo, suffixes, D)
+    save_global_outputs(
+        "baseline",
+        model,
+        safe_model,
+        df1,
+        df2,
+        k,
+        index_time,
+        avg_search_time,
+        mem_used_create_index,
+        avg_mem_used_search,
+        detailed_rows,
+        df_lm_matched,
+        "baseline",
+        "faiss_baseline",
+        "matched_faiss_global.csv",
+    )
+    return df_lm_matched
+
+
+def merge_knn2_global(k, df1, df2, suffixes, model) -> DataFrame:
+    safe_model = safe_model_name(model)
+    print(f">>> [SVS] Carregando embeddings globais do modelo: {model}", flush=True)
+    embeddings_base, embeddings_query = load_global_embeddings(safe_model)
+
+    df1 = df1.copy().reset_index(drop=True)
+    df2 = df2.copy().reset_index(drop=True)
+    k_efetivo = min(k, len(df1))
+    class_svs = VamanaIndexer()
+    process = psutil.Process(os.getpid())
+
+    mem_before = process.memory_info().rss / (1024 ** 2)
+    start_index_time = time.time()
+    index = class_svs.build(
+        base_embeddings=embeddings_base,
+        reduced_dims=128,
+        graph_max_degree=64,
+        window_size=128,
+        distance="L2",
+        num_threads=4,
+        primary_kind="lvq4",
+        secondary_kind="lvq8",
+    )
+    index_time = time.time() - start_index_time
+    mem_after = process.memory_info().rss / (1024 ** 2)
+    mem_used_create_index = mem_after - mem_before
+
+    detailed_rows = {"execucao": [], "tempo_busca": [], "memoria_usada_busca_MB": []}
+    soma_tempo_busca = 0.0
+    soma_memoria_busca = 0.0
+    I = None
+    D = None
+    for i in range(NUM_EXECUCOES_BUSCA):
+        mem_before = process.memory_info().rss / (1024 ** 2)
+        start_search_time = time.time()
+        I, D = index.search(embeddings_query, k_efetivo)
+        search_time = time.time() - start_search_time
+        mem_after = process.memory_info().rss / (1024 ** 2)
+        mem_used_search = mem_after - mem_before
+        soma_tempo_busca += search_time
+        soma_memoria_busca += mem_used_search
+        detailed_rows["execucao"].append(i + 1)
+        detailed_rows["tempo_busca"].append(search_time)
+        detailed_rows["memoria_usada_busca_MB"].append(mem_used_search)
+
+    avg_search_time = soma_tempo_busca / NUM_EXECUCOES_BUSCA
+    avg_mem_used_search = soma_memoria_busca / NUM_EXECUCOES_BUSCA
+    df_lm_matched = build_matches_global(df1, df2, I, k_efetivo, suffixes, D)
+    save_global_outputs(
+        "svs",
+        model,
+        safe_model,
+        df1,
+        df2,
+        k,
+        index_time,
+        avg_search_time,
+        mem_used_create_index,
+        avg_mem_used_search,
+        detailed_rows,
+        df_lm_matched,
+        "svs",
+        "svs",
+        "matched_svs_global.csv",
+    )
+    return df_lm_matched
+
+
+def merge_knn_hnsw_julia_global(k, df1, df2, suffixes, model) -> DataFrame:
+    from julia import Main
+
+    safe_model = safe_model_name(model)
+    print(f">>> [HNSW Julia] Carregando embeddings globais do modelo: {model}", flush=True)
+    embeddings_base, embeddings_query = load_global_embeddings(safe_model, normalize=True)
+    Main.include("hnsw_julia/hnsw_wrapper.jl")
+
+    df1 = df1.copy().reset_index(drop=True)
+    df2 = df2.copy().reset_index(drop=True)
+    k_efetivo = min(k, len(df1))
+    process = psutil.Process(os.getpid())
+
+    mem_before = process.memory_info().rss / (1024 ** 2)
+    start_index_time = time.time()
+    hnsw = Main.build_hnsw(embeddings_base)
+    index_time = time.time() - start_index_time
+    mem_after = process.memory_info().rss / (1024 ** 2)
+    mem_used_create_index = mem_after - mem_before
+
+    detailed_rows = {"execucao": [], "tempo_busca": [], "memoria_usada_busca_MB": []}
+    soma_tempo_busca = 0.0
+    soma_memoria_busca = 0.0
+    I = None
+    D = None
+    for i in range(NUM_EXECUCOES_BUSCA):
+        mem_before = process.memory_info().rss / (1024 ** 2)
+        I, D, tempo_busca = Main.search_hnsw(hnsw, embeddings_query, K=k_efetivo)
+        mem_after = process.memory_info().rss / (1024 ** 2)
+        mem_used_search = mem_after - mem_before
+        soma_tempo_busca += tempo_busca
+        soma_memoria_busca += mem_used_search
+        detailed_rows["execucao"].append(i + 1)
+        detailed_rows["tempo_busca"].append(tempo_busca)
+        detailed_rows["memoria_usada_busca_MB"].append(mem_used_search)
+
+    I = np.asarray(I) - 1
+    D = np.asarray(D)
+    avg_search_time = soma_tempo_busca / NUM_EXECUCOES_BUSCA
+    avg_mem_used_search = soma_memoria_busca / NUM_EXECUCOES_BUSCA
+    df_lm_matched = build_matches_global(df1, df2, I, k_efetivo, suffixes, D)
+    save_global_outputs(
+        "hnsw_julia",
+        model,
+        safe_model,
+        df1,
+        df2,
+        k,
+        index_time,
+        avg_search_time,
+        mem_used_create_index,
+        avg_mem_used_search,
+        detailed_rows,
+        df_lm_matched,
+        "hnsw_julia",
+        "hnsw_julia",
+        "matched_hnsw_julia_global.csv",
+    )
+    return df_lm_matched
+
+
+def merge_knn_nmslib_global(k, df1, df2, suffixes, model) -> DataFrame:
+    import nmslib
+
+    safe_model = safe_model_name(model)
+    print(f">>> [NMSLIB] Carregando embeddings globais do modelo: {model}", flush=True)
+    embeddings_base, embeddings_query = load_global_embeddings(safe_model, normalize=True)
+
+    df1 = df1.copy().reset_index(drop=True)
+    df2 = df2.copy().reset_index(drop=True)
+    k_efetivo = min(k, len(df1))
+    process = psutil.Process(os.getpid())
+
+    mem_before = process.memory_info().rss / (1024 ** 2)
+    start_index_time = time.time()
+    index = nmslib.init(space="cosinesimil", method="hnsw")
+    index.addDataPointBatch(embeddings_base)
+    index.createIndex({"M": 48, "efConstruction": 600}, print_progress=False)
+    index.setQueryTimeParams({"efSearch": 50})
+    index_time = time.time() - start_index_time
+    mem_after = process.memory_info().rss / (1024 ** 2)
+    mem_used_create_index = mem_after - mem_before
+
+    detailed_rows = {"execucao": [], "tempo_busca": [], "memoria_usada_busca_MB": []}
+    soma_tempo_busca = 0.0
+    soma_memoria_busca = 0.0
+    neighbors = None
+    distances = None
+    for i in range(NUM_EXECUCOES_BUSCA):
+        mem_before = process.memory_info().rss / (1024 ** 2)
+        start_search_time = time.time()
+        res = index.knnQueryBatch(embeddings_query, k=k_efetivo)
+        search_time = time.time() - start_search_time
+        mem_after = process.memory_info().rss / (1024 ** 2)
+        mem_used_search = mem_after - mem_before
+        soma_tempo_busca += search_time
+        soma_memoria_busca += mem_used_search
+        neighbors, distances = zip(*res)
+        detailed_rows["execucao"].append(i + 1)
+        detailed_rows["tempo_busca"].append(search_time)
+        detailed_rows["memoria_usada_busca_MB"].append(mem_used_search)
+
+    I = np.vstack(neighbors)
+    score_sim = 1.0 - np.vstack(distances)
+    avg_search_time = soma_tempo_busca / NUM_EXECUCOES_BUSCA
+    avg_mem_used_search = soma_memoria_busca / NUM_EXECUCOES_BUSCA
+    df_lm_matched = build_matches_global(df1, df2, I, k_efetivo, suffixes, score_sim)
+    save_global_outputs(
+        "NMSLIB",
+        model,
+        safe_model,
+        df1,
+        df2,
+        k,
+        index_time,
+        avg_search_time,
+        mem_used_create_index,
+        avg_mem_used_search,
+        detailed_rows,
+        df_lm_matched,
+        "NMSLIB",
+        "nmslib_hnsw",
+        "matched_nmslib_global.csv",
+    )
+    return df_lm_matched
+
 def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     # ================================
     #     INDEXAÇÃO (FAISS)

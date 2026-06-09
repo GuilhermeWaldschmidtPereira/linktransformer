@@ -20,7 +20,7 @@ from main_linktransformer import (  # noqa: E402
     load_input_data,
     prepare_dataframes,
 )
-from linktransformer.infer_main import merge_knn_nmslib  # noqa: E402
+from linktransformer.infer_main import merge_knn_nmslib, merge_knn_nmslib_global  # noqa: E402
 from model_selection import (  # noqa: E402
     MODELOS_A_UTILIZAR,
     parse_embedding_model_args,
@@ -36,18 +36,22 @@ def main() -> None:
 
     print(f">>> Modelos disponiveis: {MODELOS_A_UTILIZAR}", flush=True)
     print(f">>> Modelos selecionados: {modelos_a_executar}", flush=True)
+    print(f">>> Escopo selecionado: {args.scope}", flush=True)
 
     df_base, df_query = load_input_data()
     suffixes = ("_x", "_y")
     ks = [1]
 
     for modelo in modelos_a_executar:
-        assert_embeddings_exist(modelo)
+        assert_embeddings_exist(modelo, args.scope)
         df1, df2 = prepare_dataframes(df_base, df_query)
 
         for k in ks:
-            print(f">>> Rodando NMSLIB | modelo={modelo} | k={k}")
-            merge_knn_nmslib(k, df1, df2, suffixes, modelo)
+            print(f">>> Rodando NMSLIB | modelo={modelo} | k={k} | scope={args.scope}")
+            if args.scope == "geral":
+                merge_knn_nmslib_global(k, df1, df2, suffixes, modelo)
+            else:
+                merge_knn_nmslib(k, df1, df2, suffixes, modelo)
 
 
 if __name__ == "__main__":

@@ -286,6 +286,157 @@ def build_scann_searcher(embeddings1: np.ndarray, k: int):
         "SCANN_BUILDER_MODE inválido. Use 'brute_force' ou 'tree_ah'."
     )
 
+
+def build_matches_global(
+    df_base: DataFrame,
+    df_query: DataFrame,
+    I: np.ndarray,
+    k_efetivo: int,
+    suffixes: Tuple[str, str],
+    scores: Optional[np.ndarray] = None,
+) -> DataFrame:
+    df_query_expanded = df_query.loc[
+        np.repeat(df_query.index.values, k_efetivo)
+    ].reset_index(drop=True)
+    df_base_expanded = df_base.iloc[I.flatten()].reset_index(drop=True)
+
+    df_lm_matched = df_query_expanded.merge(
+        df_base_expanded,
+        left_index=True,
+        right_index=True,
+        how="inner",
+        suffixes=suffixes,
+    )
+
+    if scores is not None:
+        df_lm_matched["score"] = scores.flatten()
+
+    return df_lm_matched
+
+
+def normalize_embeddings(embeddings: np.ndarray) -> np.ndarray:
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    return embeddings / norms
+
+
+def merge_knn_scann_global(
+    k,
+    df1,
+    df2,
+    suffixes,
+    model,
+) -> DataFrame:
+    safe_model = safe_model_name(model)
+    path_resultados_scann = os.path.join(PATH_RESULTADOS, "scann", safe_model)
+    print(f">>> [ScaNN] Carregando embeddings globais do modelo: {model}", flush=True)
+    embeddings1, embeddings2 = load_flat_embeddings(safe_model)
+    embeddings1 = normalize_embeddings(embeddings1)
+    embeddings2 = normalize_embeddings(embeddings2)
+    print(
+        f">>> [ScaNN] Embeddings carregados | base={embeddings1.shape} | query={embeddings2.shape}",
+        flush=True,
+    )
+
+    df1 = df1.copy().reset_index(drop=True)
+    df2 = df2.copy().reset_index(drop=True)
+    k_efetivo = min(k, len(df1))
+    process = psutil.Process(os.getpid())
+    num_execucoes = get_env_int("SCANN_NUM_EXECUCOES", 1)
+    query_batch_size = get_env_int("SCANN_QUERY_BATCH_SIZE", 0)
+    leaves_to_search_override = os.environ.get("SCANN_LEAVES_TO_SEARCH")
+    pre_reorder_override = os.environ.get("SCANN_PRE_REORDER_NUM_NEIGHBORS")
+
+    mem_before = process.memory_info().rss / (1024 ** 2)
+    start_index_time = time.time()
+    builder = build_scann_searcher(embeddings1, k_efetivo)
+    searcher = builder.build()
+    index_time = time.time() - start_index_time
+    mem_after = process.memory_info().rss / (1024 ** 2)
+    mem_used_create_index = mem_after - mem_before
+
+    search_kwargs = {"final_num_neighbors": k_efetivo}
+    if leaves_to_search_override not in (None, ""):
+        search_kwargs["leaves_to_search"] = int(leaves_to_search_override)
+    if pre_reorder_override not in (None, ""):
+        search_kwargs["pre_reorder_num_neighbors"] = int(pre_reorder_override)
+
+    dict_ = {"execucao": [], "tempo_busca": [], "memoria_usada_busca_MB": []}
+    soma_tempo_busca = 0.0
+    soma_memoria_busca = 0.0
+    I = None
+    D = None
+    for i in range(num_execucoes):
+        print(f">>> [ScaNN] Execução global {i + 1}/{num_execucoes}", flush=True)
+        mem_before = process.memory_info().rss / (1024 ** 2)
+        start_search_time = time.time()
+        if query_batch_size > 0:
+            result_indices = []
+            result_distances = []
+            for start_idx in range(0, len(embeddings2), query_batch_size):
+                end_idx = min(start_idx + query_batch_size, len(embeddings2))
+                chunk_I, chunk_D = searcher.search_batched(
+                    embeddings2[start_idx:end_idx],
+                    **search_kwargs,
+                )
+                result_indices.append(chunk_I)
+                result_distances.append(chunk_D)
+            I = np.vstack(result_indices)
+            D = np.vstack(result_distances)
+        else:
+            I, D = searcher.search_batched(embeddings2, **search_kwargs)
+        search_time = time.time() - start_search_time
+        mem_after = process.memory_info().rss / (1024 ** 2)
+        mem_used_search = mem_after - mem_before
+
+        soma_tempo_busca += search_time
+        soma_memoria_busca += mem_used_search
+        dict_["execucao"].append(i + 1)
+        dict_["tempo_busca"].append(search_time)
+        dict_["memoria_usada_busca_MB"].append(mem_used_search)
+
+    avg_search_time = soma_tempo_busca / num_execucoes
+    avg_mem_used_search = soma_memoria_busca / num_execucoes
+    df_lm_matched = build_matches_global(df1, df2, I, k_efetivo, suffixes, D)
+
+    df_tempos_busca_scann = pd.DataFrame(dict_)
+    df_tempos_busca_scann["modelo_index"] = "scann"
+    df_tempos_busca_scann["modelo_embedding"] = str(model)
+
+    df_aux = pd.read_csv(PATH_resultados_scann)
+    df_aux = pd.concat([df_aux, df_tempos_busca_scann], ignore_index=True)
+    df_aux.to_csv(PATH_resultados_scann, index=False)
+
+    os.makedirs(path_resultados_scann, exist_ok=True)
+    df_tempos_busca_scann.to_csv(
+        os.path.join(path_resultados_scann, "csv_final_tempos_buscas.csv"),
+        index=False,
+    )
+    df_lm_matched.to_csv(os.path.join(PATH_RESULTADOS, "matched_scann_global.csv"), index=False)
+
+    results_df = pd.DataFrame({
+        "metodo": ["scann"],
+        "modelo_embedding": [str(model)],
+        "index_time": [index_time],
+        "search_time": [avg_search_time],
+        "total_time": [index_time + avg_search_time],
+        "num_rows_df1": [len(df1)],
+        "num_rows_df2": [len(df2)],
+        "k": [k],
+        "mem_used_indexation_MB": [mem_used_create_index],
+        "avg_mem_used_search_MB": [avg_mem_used_search],
+        "matches": [count_setor_matches(df_lm_matched)],
+    })
+
+    results_file = os.path.join(PATH_RESULTADOS, "resultados.csv")
+    if os.path.exists(results_file):
+        results_df.to_csv(results_file, mode="a", header=False, index=False)
+    else:
+        results_df.to_csv(results_file, mode="w", header=True, index=False)
+
+    print(">>> [ScaNN] Processamento global do modelo concluído com sucesso.", flush=True)
+    return df_lm_matched
+
 def merge_knn_scann(
     k,
     df1,
