@@ -106,6 +106,14 @@ def parse_args() -> argparse.Namespace:
             "Por padrão, quando --merge-partitions está ativo, as partições são removidas após o merge."
         ),
     )
+    parser.add_argument(
+        "--group-by-municipality",
+        action="store_true",
+        help=(
+            "Agrupa e salva um arquivo por município. Sem esta flag, processa por partições "
+            "de linhas e, com --merge-partitions, salva um arquivo final único."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -617,6 +625,122 @@ def process_base_partitioned(
         manifest.append(manifest_entry)
 
 
+def process_query_partitioned(
+    args: argparse.Namespace,
+    models: List[str],
+    manifest: List[dict],
+) -> None:
+    """Processa apenas a query em partições."""
+    print(f">>> Preparando query para processamento particionado...", flush=True)
+    query_columns = resolve_single_side_columns(args.right_on, normalize_column_spec(args.on), "right")
+
+    num_rows = count_rows(args.query_path)
+    num_partitions = (num_rows + args.partition_size - 1) // args.partition_size
+    print(f">>> Query com {num_rows} linhas | {num_partitions} partições de {args.partition_size} linhas", flush=True)
+
+    for model_name in models:
+        print(f"\n>>> Processando modelo: {model_name}", flush=True)
+        model_start_time = time.perf_counter()
+        model_memory_start_mb = current_memory_mb()
+
+        partition_dir = get_partition_output_dir(args.output_dir, model_name)
+        os.makedirs(partition_dir, exist_ok=True)
+
+        merged_memmap = None
+        merged_offset = 0
+        merged_path = get_merged_output_path(args.output_dir, model_name, "query")
+
+        for partition_idx, df_partition in enumerate(
+            iter_dataframe_partitions(
+                args.query_path,
+                partition_size=args.partition_size,
+                csv_encoding=args.csv_encoding,
+            )
+        ):
+            start_idx = partition_idx * args.partition_size
+            end_idx = min(start_idx + args.partition_size, num_rows)
+
+            print(
+                f"  Partição {partition_idx + 1}/{num_partitions} | "
+                f"linhas {start_idx}-{end_idx-1} ({len(df_partition)} registros)",
+                flush=True,
+            )
+
+            partition_start_time = time.perf_counter()
+            embeddings_partition = build_embeddings(
+                df=df_partition,
+                columns=query_columns,
+                model_name=model_name,
+                batch_size=args.batch_size,
+                openai_key=args.openai_key,
+                label=f"query_partition_{partition_idx}",
+            )
+
+            partition_path = get_partition_path(partition_dir, partition_idx, "query")
+            os.makedirs(os.path.dirname(partition_path), exist_ok=True)
+            np.save(partition_path, embeddings_partition.astype(np.float32))
+
+            if args.merge_partitions:
+                merged_memmap, merged_offset = write_to_merged_memmap(
+                    merged_memmap,
+                    merged_output_path=merged_path,
+                    total_rows=num_rows,
+                    offset=merged_offset,
+                    embeddings_partition=embeddings_partition,
+                )
+                merged_memmap.flush()
+                if not args.keep_partitions_after_merge:
+                    os.remove(partition_path)
+                    print(f"    Partição removida após merge: {partition_path}", flush=True)
+
+            partition_elapsed = time.perf_counter() - partition_start_time
+            if args.merge_partitions and not args.keep_partitions_after_merge:
+                print(f"    Merge concluído para partição {partition_idx}: {elapsed_summary(partition_elapsed)}", flush=True)
+            else:
+                print(f"    Salvo: {partition_path} | {elapsed_summary(partition_elapsed)}", flush=True)
+
+            del embeddings_partition
+            del df_partition
+            gc.collect()
+
+        if args.merge_partitions and merged_memmap is not None:
+            del merged_memmap
+            print(f"  Embeddings mesclados salvos em: {merged_path}", flush=True)
+
+        elapsed_seconds = time.perf_counter() - model_start_time
+        model_memory_end_mb = current_memory_mb()
+        model_memory_peak_mb = max(model_memory_start_mb, model_memory_end_mb)
+
+        print(f"Tempo total do modelo {model_name}: {elapsed_summary(elapsed_seconds)}", flush=True)
+        print(
+            f"Memória total do modelo {model_name}: "
+            f"início {model_memory_start_mb:.2f} MB | fim {model_memory_end_mb:.2f} MB | "
+            f"peak aprox. {model_memory_peak_mb:.2f} MB | delta {model_memory_end_mb - model_memory_start_mb:.2f} MB",
+            flush=True,
+        )
+
+        manifest_entry = {
+            "model": model_name,
+            "safe_model_name": safe_model_name(model_name),
+            "mode": "query",
+            "partition_size": args.partition_size,
+            "num_partitions": num_partitions,
+            "total_rows": num_rows,
+            "partition_dir": partition_dir,
+            "elapsed_seconds": elapsed_seconds,
+            "elapsed_minutes": elapsed_seconds / 60.0,
+            "memory_start_mb": model_memory_start_mb,
+            "memory_end_mb": model_memory_end_mb,
+            "memory_peak_mb": model_memory_peak_mb,
+            "memory_delta_mb": model_memory_end_mb - model_memory_start_mb,
+        }
+
+        if args.merge_partitions:
+            manifest_entry["merged_path"] = get_merged_output_path(args.output_dir, model_name, "query")
+
+        manifest.append(manifest_entry)
+
+
 def process_both_partitioned(
     args: argparse.Namespace,
     models: List[str],
@@ -821,18 +945,30 @@ def main() -> None:
     os.makedirs(os.path.join(args.output_dir, "query"), exist_ok=True)
     manifest = []
 
-    print(">>> Processamento por município habilitado", flush=True)
-    print(f">>> Partições de {args.partition_size:,} linhas (usadas apenas no modo legado)", flush=True)
+    if args.group_by_municipality:
+        processing_mode = "município"
+    else:
+        processing_mode = "partições de linhas"
+
+    print(f">>> Processamento por {processing_mode} habilitado", flush=True)
+    print(f">>> Partições de {args.partition_size:,} linhas", flush=True)
     print(f">>> Output dir: {args.output_dir}", flush=True)
     print(f">>> Modelos: {', '.join(models)}", flush=True)
-    print(f">>> Merge partitions: {args.merge_partitions} (ignorado no processamento por município)", flush=True)
+    print(f">>> Merge partitions: {args.merge_partitions}", flush=True)
 
-    if args.mode == "both":
-        process_both_by_municipality(args, models, manifest)
+    if args.group_by_municipality:
+        if args.mode == "both":
+            process_both_by_municipality(args, models, manifest)
+        elif args.mode == "base":
+            process_base_by_municipality(args, models, manifest)
+        else:
+            process_query_by_municipality(args, models, manifest)
+    elif args.mode == "both":
+        process_both_partitioned(args, models, manifest)
     elif args.mode == "base":
-        process_base_by_municipality(args, models, manifest)
+        process_base_partitioned(args, models, manifest)
     else:
-        process_query_by_municipality(args, models, manifest)
+        process_query_partitioned(args, models, manifest)
 
     if args.manifest_path:
         manifest_dir = os.path.dirname(args.manifest_path)
