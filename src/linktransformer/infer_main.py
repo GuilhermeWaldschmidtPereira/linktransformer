@@ -10,10 +10,9 @@ import svs
 from typing import Union, List, Optional, Tuple,Dict, Any
 from pandas import DataFrame
 
-import psutil
-import os
 from linktransformer.cluster_fns import cluster
 # from linktransformer.utils import serialize_columns, infer_embeddings, load_model, load_clf, cosine_similarity_corresponding_pairs, tokenize_data_for_inference, predict_rows_with_openai
+from linktransformer.memory_utils import PeakMemoryMonitor
 from linktransformer.utils import *
 from sklearn.metrics.pairwise import cosine_similarity
 from itertools import combinations
@@ -337,15 +336,12 @@ def merge_knn_global(k, df1, df2, suffixes, model) -> DataFrame:
     df1 = df1.copy().reset_index(drop=True)
     df2 = df2.copy().reset_index(drop=True)
     k_efetivo = min(k, len(df1))
-    process = psutil.Process(os.getpid())
-
-    mem_before = process.memory_info().rss / (1024 ** 2)
     start_index_time = time.time()
-    index = faiss.IndexFlatIP(embeddings_base.shape[1])
-    index.add(embeddings_base)
+    with PeakMemoryMonitor() as memory_monitor:
+        index = faiss.IndexFlatIP(embeddings_base.shape[1])
+        index.add(embeddings_base)
     index_time = time.time() - start_index_time
-    mem_after = process.memory_info().rss / (1024 ** 2)
-    mem_used_create_index = mem_after - mem_before
+    mem_used_create_index = memory_monitor.peak_delta_mb
 
     detailed_rows = {"execucao": [], "tempo_busca": [], "memoria_usada_busca_MB": []}
     soma_tempo_busca = 0.0
@@ -353,12 +349,11 @@ def merge_knn_global(k, df1, df2, suffixes, model) -> DataFrame:
     D = None
     I = None
     for i in range(NUM_EXECUCOES_BUSCA):
-        mem_before = process.memory_info().rss / (1024 ** 2)
         start_search_time = time.time()
-        D, I = index.search(embeddings_query, k_efetivo)
+        with PeakMemoryMonitor() as memory_monitor:
+            D, I = index.search(embeddings_query, k_efetivo)
         search_time = time.time() - start_search_time
-        mem_after = process.memory_info().rss / (1024 ** 2)
-        mem_used_search = mem_after - mem_before
+        mem_used_search = memory_monitor.peak_delta_mb
         soma_tempo_busca += search_time
         soma_memoria_busca += mem_used_search
         detailed_rows["execucao"].append(i + 1)
@@ -397,23 +392,20 @@ def merge_knn2_global(k, df1, df2, suffixes, model) -> DataFrame:
     df2 = df2.copy().reset_index(drop=True)
     k_efetivo = min(k, len(df1))
     class_svs = VamanaIndexer()
-    process = psutil.Process(os.getpid())
-
-    mem_before = process.memory_info().rss / (1024 ** 2)
     start_index_time = time.time()
-    index = class_svs.build(
-        base_embeddings=embeddings_base,
-        reduced_dims=128,
-        graph_max_degree=64,
-        window_size=128,
-        distance="L2",
-        num_threads=4,
-        primary_kind="lvq4",
-        secondary_kind="lvq8",
-    )
+    with PeakMemoryMonitor() as memory_monitor:
+        index = class_svs.build(
+            base_embeddings=embeddings_base,
+            reduced_dims=128,
+            graph_max_degree=64,
+            window_size=128,
+            distance="L2",
+            num_threads=4,
+            primary_kind="lvq4",
+            secondary_kind="lvq8",
+        )
     index_time = time.time() - start_index_time
-    mem_after = process.memory_info().rss / (1024 ** 2)
-    mem_used_create_index = mem_after - mem_before
+    mem_used_create_index = memory_monitor.peak_delta_mb
 
     detailed_rows = {"execucao": [], "tempo_busca": [], "memoria_usada_busca_MB": []}
     soma_tempo_busca = 0.0
@@ -421,12 +413,11 @@ def merge_knn2_global(k, df1, df2, suffixes, model) -> DataFrame:
     I = None
     D = None
     for i in range(NUM_EXECUCOES_BUSCA):
-        mem_before = process.memory_info().rss / (1024 ** 2)
         start_search_time = time.time()
-        I, D = index.search(embeddings_query, k_efetivo)
+        with PeakMemoryMonitor() as memory_monitor:
+            I, D = index.search(embeddings_query, k_efetivo)
         search_time = time.time() - start_search_time
-        mem_after = process.memory_info().rss / (1024 ** 2)
-        mem_used_search = mem_after - mem_before
+        mem_used_search = memory_monitor.peak_delta_mb
         soma_tempo_busca += search_time
         soma_memoria_busca += mem_used_search
         detailed_rows["execucao"].append(i + 1)
@@ -467,14 +458,11 @@ def merge_knn_hnsw_julia_global(k, df1, df2, suffixes, model) -> DataFrame:
     df1 = df1.copy().reset_index(drop=True)
     df2 = df2.copy().reset_index(drop=True)
     k_efetivo = min(k, len(df1))
-    process = psutil.Process(os.getpid())
-
-    mem_before = process.memory_info().rss / (1024 ** 2)
     start_index_time = time.time()
-    hnsw = Main.build_hnsw(embeddings_base)
+    with PeakMemoryMonitor() as memory_monitor:
+        hnsw = Main.build_hnsw(embeddings_base)
     index_time = time.time() - start_index_time
-    mem_after = process.memory_info().rss / (1024 ** 2)
-    mem_used_create_index = mem_after - mem_before
+    mem_used_create_index = memory_monitor.peak_delta_mb
 
     detailed_rows = {"execucao": [], "tempo_busca": [], "memoria_usada_busca_MB": []}
     soma_tempo_busca = 0.0
@@ -482,10 +470,9 @@ def merge_knn_hnsw_julia_global(k, df1, df2, suffixes, model) -> DataFrame:
     I = None
     D = None
     for i in range(NUM_EXECUCOES_BUSCA):
-        mem_before = process.memory_info().rss / (1024 ** 2)
-        I, D, tempo_busca = Main.search_hnsw(hnsw, embeddings_query, K=k_efetivo)
-        mem_after = process.memory_info().rss / (1024 ** 2)
-        mem_used_search = mem_after - mem_before
+        with PeakMemoryMonitor() as memory_monitor:
+            I, D, tempo_busca = Main.search_hnsw(hnsw, embeddings_query, K=k_efetivo)
+        mem_used_search = memory_monitor.peak_delta_mb
         soma_tempo_busca += tempo_busca
         soma_memoria_busca += mem_used_search
         detailed_rows["execucao"].append(i + 1)
@@ -527,17 +514,14 @@ def merge_knn_nmslib_global(k, df1, df2, suffixes, model) -> DataFrame:
     df1 = df1.copy().reset_index(drop=True)
     df2 = df2.copy().reset_index(drop=True)
     k_efetivo = min(k, len(df1))
-    process = psutil.Process(os.getpid())
-
-    mem_before = process.memory_info().rss / (1024 ** 2)
     start_index_time = time.time()
-    index = nmslib.init(space="cosinesimil", method="hnsw")
-    index.addDataPointBatch(embeddings_base)
-    index.createIndex({"M": 48, "efConstruction": 600}, print_progress=False)
-    index.setQueryTimeParams({"efSearch": 50})
+    with PeakMemoryMonitor() as memory_monitor:
+        index = nmslib.init(space="cosinesimil", method="hnsw")
+        index.addDataPointBatch(embeddings_base)
+        index.createIndex({"M": 48, "efConstruction": 600}, print_progress=False)
+        index.setQueryTimeParams({"efSearch": 50})
     index_time = time.time() - start_index_time
-    mem_after = process.memory_info().rss / (1024 ** 2)
-    mem_used_create_index = mem_after - mem_before
+    mem_used_create_index = memory_monitor.peak_delta_mb
 
     detailed_rows = {"execucao": [], "tempo_busca": [], "memoria_usada_busca_MB": []}
     soma_tempo_busca = 0.0
@@ -545,12 +529,11 @@ def merge_knn_nmslib_global(k, df1, df2, suffixes, model) -> DataFrame:
     neighbors = None
     distances = None
     for i in range(NUM_EXECUCOES_BUSCA):
-        mem_before = process.memory_info().rss / (1024 ** 2)
         start_search_time = time.time()
-        res = index.knnQueryBatch(embeddings_query, k=k_efetivo)
+        with PeakMemoryMonitor() as memory_monitor:
+            res = index.knnQueryBatch(embeddings_query, k=k_efetivo)
         search_time = time.time() - start_search_time
-        mem_after = process.memory_info().rss / (1024 ** 2)
-        mem_used_search = mem_after - mem_before
+        mem_used_search = memory_monitor.peak_delta_mb
         soma_tempo_busca += search_time
         soma_memoria_busca += mem_used_search
         neighbors, distances = zip(*res)
@@ -610,7 +593,6 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     df1 = df1.copy().reset_index(drop=True)
     df2 = df2.copy().reset_index(drop=True)
     municipio_col = get_municipio_column(df1, df2)
-    process = psutil.Process(os.getpid())
     num_execucoes = NUM_EXECUCOES_BUSCA
 
     dict_ = {
@@ -638,11 +620,10 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
             embeddings_query_mun = embeddings2[query_idx]
 
         start_index_time = time.time()
-        mem_before = process.memory_info().rss / (1024 ** 2)
-        index = faiss.IndexFlatIP(embeddings_base_mun.shape[1])
-        index.add(embeddings_base_mun)
-        mem_after = process.memory_info().rss / (1024 ** 2)
-        mem_used_create_index = mem_after - mem_before
+        with PeakMemoryMonitor() as memory_monitor:
+            index = faiss.IndexFlatIP(embeddings_base_mun.shape[1])
+            index.add(embeddings_base_mun)
+        mem_used_create_index = memory_monitor.peak_delta_mb
         index_time = time.time() - start_index_time
 
         soma_tempo_busca = 0.0
@@ -651,10 +632,9 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
         I = None
         for i in range(num_execucoes):
             start_search_time = time.time()
-            mem_before = process.memory_info().rss / (1024 ** 2)
-            D, I = index.search(embeddings_query_mun, k_efetivo)
-            mem_after = process.memory_info().rss / (1024 ** 2)
-            mem_used_search = mem_after - mem_before
+            with PeakMemoryMonitor() as memory_monitor:
+                D, I = index.search(embeddings_query_mun, k_efetivo)
+            mem_used_search = memory_monitor.peak_delta_mb
             search_time = time.time() - start_search_time
             soma_tempo_busca += search_time
             soma_memoria_busca += mem_used_search
@@ -795,7 +775,6 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
     df2 = df2.copy().reset_index(drop=True)
     municipio_col = get_municipio_column(df1, df2)
     class_svs = VamanaIndexer()
-    process = psutil.Process(os.getpid())
     num_execucoes = NUM_EXECUCOES_BUSCA
 
     dict_ = {
@@ -823,19 +802,18 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
             embeddings_query_mun = embeddings2[query_idx]
 
         start_index_time = time.time()
-        mem_before = process.memory_info().rss / (1024 ** 2)
-        index = class_svs.build(
-            base_embeddings=embeddings_base_mun,
-            reduced_dims=128,
-            graph_max_degree=64,
-            window_size=128,
-            distance="L2",
-            num_threads=4,
-            primary_kind="lvq4",
-            secondary_kind="lvq8",
-        )
-        mem_after = process.memory_info().rss / (1024 ** 2)
-        mem_used_create_index = mem_after - mem_before
+        with PeakMemoryMonitor() as memory_monitor:
+            index = class_svs.build(
+                base_embeddings=embeddings_base_mun,
+                reduced_dims=128,
+                graph_max_degree=64,
+                window_size=128,
+                distance="L2",
+                num_threads=4,
+                primary_kind="lvq4",
+                secondary_kind="lvq8",
+            )
+        mem_used_create_index = memory_monitor.peak_delta_mb
         index_time = time.time() - start_index_time
 
         soma_tempo_busca = 0.0
@@ -844,10 +822,9 @@ def merge_knn2(k, df1, df2, suffixes, model) -> DataFrame:
         D = None
         for i in range(num_execucoes):
             start_search_time = time.time()
-            mem_before = process.memory_info().rss / (1024 ** 2)
-            I, D = index.search(embeddings_query_mun, k_efetivo)
-            mem_after = process.memory_info().rss / (1024 ** 2)
-            mem_used_search = mem_after - mem_before
+            with PeakMemoryMonitor() as memory_monitor:
+                I, D = index.search(embeddings_query_mun, k_efetivo)
+            mem_used_search = memory_monitor.peak_delta_mb
             search_time = time.time() - start_search_time
             soma_tempo_busca += search_time
             soma_memoria_busca += mem_used_search
@@ -995,7 +972,6 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
     df1 = df1.copy().reset_index(drop=True)
     df2 = df2.copy().reset_index(drop=True)
     municipio_col = get_municipio_column(df1, df2)
-    process = psutil.Process(os.getpid())
     num_execucoes = NUM_EXECUCOES_BUSCA
 
     dict_ = {
@@ -1025,10 +1001,9 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
             embeddings_query_mun = embeddings2[query_idx]
 
         start_index_time = time.time()
-        mem_before = process.memory_info().rss / (1024 ** 2)
-        hnsw = Main.build_hnsw(embeddings_base_mun)
-        mem_after = process.memory_info().rss / (1024 ** 2)
-        mem_used_create_index = mem_after - mem_before
+        with PeakMemoryMonitor() as memory_monitor:
+            hnsw = Main.build_hnsw(embeddings_base_mun)
+        mem_used_create_index = memory_monitor.peak_delta_mb
         index_time = time.time() - start_index_time
 
         soma_tempo_busca = 0.0
@@ -1036,10 +1011,9 @@ def merge_knn_hnsw_julia(k, df1, df2, suffixes, model) -> DataFrame:
         I = None
         D = None
         for i in range(num_execucoes):
-            mem_before = process.memory_info().rss / (1024 ** 2)
-            I, D, tempo_busca = Main.search_hnsw(hnsw, embeddings_query_mun, K=k_efetivo)
-            mem_after = process.memory_info().rss / (1024 ** 2)
-            mem_used_search = mem_after - mem_before
+            with PeakMemoryMonitor() as memory_monitor:
+                I, D, tempo_busca = Main.search_hnsw(hnsw, embeddings_query_mun, K=k_efetivo)
+            mem_used_search = memory_monitor.peak_delta_mb
             soma_tempo_busca += tempo_busca
             soma_memoria_busca += mem_used_search
 
@@ -1180,7 +1154,6 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
     df1 = df1.copy().reset_index(drop=True)
     df2 = df2.copy().reset_index(drop=True)
     municipio_col = get_municipio_column(df1, df2)
-    process = psutil.Process(os.getpid())
     num_execucoes = NUM_EXECUCOES_BUSCA
 
     dict_ = {
@@ -1210,22 +1183,21 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
             embeddings_query_mun = embeddings2[query_idx]
 
         start_index_time = time.time()
-        mem_before = process.memory_info().rss / (1024 ** 2)
-        index = nmslib.init(
-            space="cosinesimil",
-            method="hnsw"
-        )
-        index.addDataPointBatch(embeddings_base_mun)
-        index.createIndex(
-            {
-                "M": 48,
-                "efConstruction": 600,
-            },
-            print_progress=False,
-        )
-        index.setQueryTimeParams({"efSearch": 50})
-        mem_after = process.memory_info().rss / (1024 ** 2)
-        mem_used_create_index = mem_after - mem_before
+        with PeakMemoryMonitor() as memory_monitor:
+            index = nmslib.init(
+                space="cosinesimil",
+                method="hnsw"
+            )
+            index.addDataPointBatch(embeddings_base_mun)
+            index.createIndex(
+                {
+                    "M": 48,
+                    "efConstruction": 600,
+                },
+                print_progress=False,
+            )
+            index.setQueryTimeParams({"efSearch": 50})
+        mem_used_create_index = memory_monitor.peak_delta_mb
         index_time = time.time() - start_index_time
 
         soma_tempo_busca = 0.0
@@ -1234,10 +1206,9 @@ def merge_knn_nmslib(k, df1, df2, suffixes, model) -> DataFrame:
         distances = None
         for i in range(num_execucoes):
             start_search_time = time.time()
-            mem_before = process.memory_info().rss / (1024 ** 2)
-            res = index.knnQueryBatch(embeddings_query_mun, k=k_efetivo)
-            mem_after = process.memory_info().rss / (1024 ** 2)
-            mem_used_search = mem_after - mem_before
+            with PeakMemoryMonitor() as memory_monitor:
+                res = index.knnQueryBatch(embeddings_query_mun, k=k_efetivo)
+            mem_used_search = memory_monitor.peak_delta_mb
             search_time = time.time() - start_search_time
             soma_tempo_busca += search_time
             soma_memoria_busca += mem_used_search

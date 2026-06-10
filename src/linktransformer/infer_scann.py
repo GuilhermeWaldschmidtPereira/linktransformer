@@ -8,8 +8,8 @@ from typing import Union, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from pandas import DataFrame
-import psutil
 
+from linktransformer.memory_utils import PeakMemoryMonitor, current_memory_mb
 from linktransformer.utils import *
 
 def get_data_dir_candidates() -> List[str]:
@@ -341,19 +341,17 @@ def merge_knn_scann_global(
     df1 = df1.copy().reset_index(drop=True)
     df2 = df2.copy().reset_index(drop=True)
     k_efetivo = min(k, len(df1))
-    process = psutil.Process(os.getpid())
     num_execucoes = get_env_int("SCANN_NUM_EXECUCOES", 1)
     query_batch_size = get_env_int("SCANN_QUERY_BATCH_SIZE", 0)
     leaves_to_search_override = os.environ.get("SCANN_LEAVES_TO_SEARCH")
     pre_reorder_override = os.environ.get("SCANN_PRE_REORDER_NUM_NEIGHBORS")
 
-    mem_before = process.memory_info().rss / (1024 ** 2)
     start_index_time = time.time()
-    builder = build_scann_searcher(embeddings1, k_efetivo)
-    searcher = builder.build()
+    with PeakMemoryMonitor() as memory_monitor:
+        builder = build_scann_searcher(embeddings1, k_efetivo)
+        searcher = builder.build()
     index_time = time.time() - start_index_time
-    mem_after = process.memory_info().rss / (1024 ** 2)
-    mem_used_create_index = mem_after - mem_before
+    mem_used_create_index = memory_monitor.peak_delta_mb
 
     search_kwargs = {"final_num_neighbors": k_efetivo}
     if leaves_to_search_override not in (None, ""):
@@ -368,26 +366,25 @@ def merge_knn_scann_global(
     D = None
     for i in range(num_execucoes):
         print(f">>> [ScaNN] Execução global {i + 1}/{num_execucoes}", flush=True)
-        mem_before = process.memory_info().rss / (1024 ** 2)
         start_search_time = time.time()
-        if query_batch_size > 0:
-            result_indices = []
-            result_distances = []
-            for start_idx in range(0, len(embeddings2), query_batch_size):
-                end_idx = min(start_idx + query_batch_size, len(embeddings2))
-                chunk_I, chunk_D = searcher.search_batched(
-                    embeddings2[start_idx:end_idx],
-                    **search_kwargs,
-                )
-                result_indices.append(chunk_I)
-                result_distances.append(chunk_D)
-            I = np.vstack(result_indices)
-            D = np.vstack(result_distances)
-        else:
-            I, D = searcher.search_batched(embeddings2, **search_kwargs)
+        with PeakMemoryMonitor() as memory_monitor:
+            if query_batch_size > 0:
+                result_indices = []
+                result_distances = []
+                for start_idx in range(0, len(embeddings2), query_batch_size):
+                    end_idx = min(start_idx + query_batch_size, len(embeddings2))
+                    chunk_I, chunk_D = searcher.search_batched(
+                        embeddings2[start_idx:end_idx],
+                        **search_kwargs,
+                    )
+                    result_indices.append(chunk_I)
+                    result_distances.append(chunk_D)
+                I = np.vstack(result_indices)
+                D = np.vstack(result_distances)
+            else:
+                I, D = searcher.search_batched(embeddings2, **search_kwargs)
         search_time = time.time() - start_search_time
-        mem_after = process.memory_info().rss / (1024 ** 2)
-        mem_used_search = mem_after - mem_before
+        mem_used_search = memory_monitor.peak_delta_mb
 
         soma_tempo_busca += search_time
         soma_memoria_busca += mem_used_search
@@ -453,8 +450,7 @@ def merge_knn_scann(
     embeddings1 = None
     embeddings2 = None
 
-    process = psutil.Process(os.getpid())
-    mem_process_before_load = process.memory_info().rss / (1024 ** 2)
+    mem_process_before_load = current_memory_mb()
 
     print(f">>> [ScaNN] Carregando embeddings do modelo: {model}", flush=True)
     if use_partitioned_embeddings:
@@ -520,13 +516,12 @@ def merge_knn_scann(
             embeddings_base_mun = embeddings1[base_idx]
             embeddings_query_mun = embeddings2[query_idx]
 
-        mem_before = process.memory_info().rss / (1024 ** 2)
         start_index_time = time.time()
-        builder = build_scann_searcher(embeddings_base_mun, k_efetivo)
-        searcher = builder.build()
+        with PeakMemoryMonitor() as memory_monitor:
+            builder = build_scann_searcher(embeddings_base_mun, k_efetivo)
+            searcher = builder.build()
         index_time = time.time() - start_index_time
-        mem_after = process.memory_info().rss / (1024 ** 2)
-        mem_used_create_index = mem_after - mem_before
+        mem_used_create_index = memory_monitor.peak_delta_mb
 
         search_kwargs = {"final_num_neighbors": k_efetivo}
         if leaves_to_search_override not in (None, ""):
@@ -544,29 +539,28 @@ def merge_knn_scann(
                 f"{i + 1}/{num_execucoes}",
                 flush=True,
             )
-            mem_before = process.memory_info().rss / (1024 ** 2)
             start_search_time = time.time()
-            if query_batch_size > 0:
-                result_indices = []
-                result_distances = []
-                for start_idx in range(0, len(embeddings_query_mun), query_batch_size):
-                    end_idx = min(start_idx + query_batch_size, len(embeddings_query_mun))
-                    chunk_I, chunk_D = searcher.search_batched(
-                        embeddings_query_mun[start_idx:end_idx],
+            with PeakMemoryMonitor() as memory_monitor:
+                if query_batch_size > 0:
+                    result_indices = []
+                    result_distances = []
+                    for start_idx in range(0, len(embeddings_query_mun), query_batch_size):
+                        end_idx = min(start_idx + query_batch_size, len(embeddings_query_mun))
+                        chunk_I, chunk_D = searcher.search_batched(
+                            embeddings_query_mun[start_idx:end_idx],
+                            **search_kwargs,
+                        )
+                        result_indices.append(chunk_I)
+                        result_distances.append(chunk_D)
+                    I = np.vstack(result_indices)
+                    D = np.vstack(result_distances)
+                else:
+                    I, D = searcher.search_batched(
+                        embeddings_query_mun,
                         **search_kwargs,
                     )
-                    result_indices.append(chunk_I)
-                    result_distances.append(chunk_D)
-                I = np.vstack(result_indices)
-                D = np.vstack(result_distances)
-            else:
-                I, D = searcher.search_batched(
-                    embeddings_query_mun,
-                    **search_kwargs,
-                )
             search_time = time.time() - start_search_time
-            mem_after = process.memory_info().rss / (1024 ** 2)
-            mem_used_search = mem_after - mem_before
+            mem_used_search = memory_monitor.peak_delta_mb
 
             soma_tempo_busca += search_time
             soma_memoria += mem_used_search

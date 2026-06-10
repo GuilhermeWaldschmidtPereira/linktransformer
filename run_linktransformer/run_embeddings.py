@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import threading
 import time
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple, Union
 
@@ -24,6 +25,7 @@ CSV_SEPARATORS = [",", ";"]
 
 ColumnSpec = Union[str, List[str]]
 EmbeddingMode = str
+MB = 1024 ** 2
 
 
 def parse_args() -> argparse.Namespace:
@@ -307,7 +309,41 @@ def elapsed_summary(elapsed_seconds: float) -> str:
 
 def current_memory_mb() -> float:
     process = psutil.Process(os.getpid())
-    return process.memory_info().rss / (1024 ** 2)
+    return process.memory_info().rss / MB
+
+
+class PeakMemoryMonitor:
+    """Samples process RSS while a block runs and reports the peak increase."""
+
+    def __init__(self, interval_seconds: float = 0.001):
+        self.process = psutil.Process(os.getpid())
+        self.interval_seconds = interval_seconds
+        self.start_mb = 0.0
+        self.end_mb = 0.0
+        self.peak_mb = 0.0
+        self.peak_delta_mb = 0.0
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def __enter__(self) -> "PeakMemoryMonitor":
+        self.start_mb = current_memory_mb()
+        self.peak_mb = self.start_mb
+        self._thread = threading.Thread(target=self._sample_until_stopped, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join()
+        self.end_mb = current_memory_mb()
+        self.peak_mb = max(self.peak_mb, self.end_mb)
+        self.peak_delta_mb = max(0.0, self.peak_mb - self.start_mb)
+
+    def _sample_until_stopped(self) -> None:
+        while not self._stop_event.is_set():
+            self.peak_mb = max(self.peak_mb, current_memory_mb())
+            self._stop_event.wait(self.interval_seconds)
 
 
 def build_embeddings(
@@ -320,23 +356,25 @@ def build_embeddings(
 ) -> np.ndarray:
     start_time = time.perf_counter()
     memory_before_mb = current_memory_mb()
-    strings = serialize_embedding_input(df, columns, model_name)
 
-    if openai_key:
-        print(f"Inferindo embeddings com OpenAI para {label}...")
-        embeddings = infer_openai_embeddings(strings, model_name, openai_key)
-    else:
-        print(f"Inferindo embeddings com SentenceTransformer para {label}...")
-        embeddings = infer_sentence_transformer_embeddings(strings, model_name, batch_size)
+    with PeakMemoryMonitor() as memory_monitor:
+        strings = serialize_embedding_input(df, columns, model_name)
+        if openai_key:
+            print(f"Inferindo embeddings com OpenAI para {label}...")
+            embeddings = infer_openai_embeddings(strings, model_name, openai_key)
+        else:
+            print(f"Inferindo embeddings com SentenceTransformer para {label}...")
+            embeddings = infer_sentence_transformer_embeddings(strings, model_name, batch_size)
 
-    embeddings = ensure_2d_normalized(embeddings)
+        embeddings = ensure_2d_normalized(embeddings)
     print(f"embeddings_{label} shape: {embeddings.shape}")
     elapsed_seconds = time.perf_counter() - start_time
-    memory_after_mb = current_memory_mb()
+    memory_after_mb = memory_monitor.end_mb
     print(f"Tempo para gerar embeddings_{label}: {elapsed_summary(elapsed_seconds)}")
     print(
         f"Memória para embeddings_{label}: "
-        f"início {memory_before_mb:.2f} MB | fim {memory_after_mb:.2f} MB | delta {memory_after_mb - memory_before_mb:.2f} MB"
+        f"início {memory_before_mb:.2f} MB | fim {memory_after_mb:.2f} MB | "
+        f"pico {memory_monitor.peak_mb:.2f} MB | pico_delta {memory_monitor.peak_delta_mb:.2f} MB"
     )
     return embeddings
 
@@ -352,31 +390,33 @@ def build_embedding_pair(
 ) -> Tuple[np.ndarray, np.ndarray]:
     start_time = time.perf_counter()
     memory_before_mb = current_memory_mb()
-    strings_left = serialize_embedding_input(df_left, left_on, model_name)
-    strings_right = serialize_embedding_input(df_right, right_on, model_name)
 
-    if openai_key:
-        print("Inferindo embeddings com OpenAI para df_left...")
-        embeddings_left = infer_openai_embeddings(strings_left, model_name, openai_key)
-        print("Inferindo embeddings com OpenAI para df_right...")
-        embeddings_right = infer_openai_embeddings(strings_right, model_name, openai_key)
-    else:
-        print("Inferindo embeddings com SentenceTransformer para df_left...")
-        embeddings_left = infer_sentence_transformer_embeddings(strings_left, model_name, batch_size)
-        print("Inferindo embeddings com SentenceTransformer para df_right...")
-        embeddings_right = infer_sentence_transformer_embeddings(strings_right, model_name, batch_size)
+    with PeakMemoryMonitor() as memory_monitor:
+        strings_left = serialize_embedding_input(df_left, left_on, model_name)
+        strings_right = serialize_embedding_input(df_right, right_on, model_name)
+        if openai_key:
+            print("Inferindo embeddings com OpenAI para df_left...")
+            embeddings_left = infer_openai_embeddings(strings_left, model_name, openai_key)
+            print("Inferindo embeddings com OpenAI para df_right...")
+            embeddings_right = infer_openai_embeddings(strings_right, model_name, openai_key)
+        else:
+            print("Inferindo embeddings com SentenceTransformer para df_left...")
+            embeddings_left = infer_sentence_transformer_embeddings(strings_left, model_name, batch_size)
+            print("Inferindo embeddings com SentenceTransformer para df_right...")
+            embeddings_right = infer_sentence_transformer_embeddings(strings_right, model_name, batch_size)
 
-    embeddings_left = ensure_2d_normalized(embeddings_left)
-    embeddings_right = ensure_2d_normalized(embeddings_right)
+        embeddings_left = ensure_2d_normalized(embeddings_left)
+        embeddings_right = ensure_2d_normalized(embeddings_right)
 
     print(f"embeddings_left shape: {embeddings_left.shape}")
     print(f"embeddings_right shape: {embeddings_right.shape}")
     elapsed_seconds = time.perf_counter() - start_time
-    memory_after_mb = current_memory_mb()
+    memory_after_mb = memory_monitor.end_mb
     print(f"Tempo para gerar embeddings do par: {elapsed_summary(elapsed_seconds)}")
     print(
         f"Memória para embeddings do par: "
-        f"início {memory_before_mb:.2f} MB | fim {memory_after_mb:.2f} MB | delta {memory_after_mb - memory_before_mb:.2f} MB"
+        f"início {memory_before_mb:.2f} MB | fim {memory_after_mb:.2f} MB | "
+        f"pico {memory_monitor.peak_mb:.2f} MB | pico_delta {memory_monitor.peak_delta_mb:.2f} MB"
     )
     return embeddings_left, embeddings_right
 
@@ -417,7 +457,9 @@ def add_memory_to_manifest(
     manifest_entry["memory_start_mb"] = memory_start_mb
     manifest_entry["memory_end_mb"] = memory_end_mb
     manifest_entry["memory_peak_mb"] = memory_peak_mb
-    manifest_entry["memory_delta_mb"] = memory_end_mb - memory_start_mb
+    manifest_entry["memory_delta_mb"] = max(0.0, memory_end_mb - memory_start_mb)
+    manifest_entry["memory_net_delta_mb"] = memory_end_mb - memory_start_mb
+    manifest_entry["memory_peak_delta_mb"] = max(0.0, memory_peak_mb - memory_start_mb)
     return manifest_entry
 
 
@@ -639,36 +681,37 @@ def main() -> None:
             model_memory_start_mb = current_memory_mb()
 
             print(f"Gerando embeddings com o modelo: {model_name}")
-            base_files = process_side_by_municipality(
-                df=df_base,
-                columns=left_on,
-                municipality_column=base_municipality_column,
-                output_dir=args.output_dir,
-                side="base",
-                model_name=model_name,
-                batch_size=args.batch_size,
-                openai_key=args.openai_key,
-                multiple_models=multiple_models,
-            )
-            query_files = process_side_by_municipality(
-                df=df_query,
-                columns=right_on,
-                municipality_column=query_municipality_column,
-                output_dir=args.output_dir,
-                side="query",
-                model_name=model_name,
-                batch_size=args.batch_size,
-                openai_key=args.openai_key,
-                multiple_models=multiple_models,
-            )
+            with PeakMemoryMonitor() as memory_monitor:
+                base_files = process_side_by_municipality(
+                    df=df_base,
+                    columns=left_on,
+                    municipality_column=base_municipality_column,
+                    output_dir=args.output_dir,
+                    side="base",
+                    model_name=model_name,
+                    batch_size=args.batch_size,
+                    openai_key=args.openai_key,
+                    multiple_models=multiple_models,
+                )
+                query_files = process_side_by_municipality(
+                    df=df_query,
+                    columns=right_on,
+                    municipality_column=query_municipality_column,
+                    output_dir=args.output_dir,
+                    side="query",
+                    model_name=model_name,
+                    batch_size=args.batch_size,
+                    openai_key=args.openai_key,
+                    multiple_models=multiple_models,
+                )
             elapsed_seconds = time.perf_counter() - model_start_time
-            model_memory_end_mb = current_memory_mb()
-            model_memory_peak_mb = max(model_memory_start_mb, model_memory_end_mb)
+            model_memory_end_mb = memory_monitor.end_mb
+            model_memory_peak_mb = memory_monitor.peak_mb
             print(f"Tempo total do modelo {model_name}: {elapsed_summary(elapsed_seconds)}")
             print(
                 f"Memória total do modelo {model_name}: "
                 f"início {model_memory_start_mb:.2f} MB | fim {model_memory_end_mb:.2f} MB | "
-                f"peak aprox. {model_memory_peak_mb:.2f} MB | delta {model_memory_end_mb - model_memory_start_mb:.2f} MB"
+                f"pico {model_memory_peak_mb:.2f} MB | pico_delta {memory_monitor.peak_delta_mb:.2f} MB"
             )
             manifest.append(
                 add_memory_to_manifest(
@@ -700,25 +743,26 @@ def main() -> None:
             model_memory_start_mb = current_memory_mb()
 
             print(f"Gerando embeddings da base com o modelo: {model_name}")
-            base_files = process_side_by_municipality(
-                df=df_base,
-                columns=base_columns,
-                municipality_column=base_municipality_column,
-                output_dir=args.output_dir,
-                side="base",
-                model_name=model_name,
-                batch_size=args.batch_size,
-                openai_key=args.openai_key,
-                multiple_models=multiple_models,
-            )
+            with PeakMemoryMonitor() as memory_monitor:
+                base_files = process_side_by_municipality(
+                    df=df_base,
+                    columns=base_columns,
+                    municipality_column=base_municipality_column,
+                    output_dir=args.output_dir,
+                    side="base",
+                    model_name=model_name,
+                    batch_size=args.batch_size,
+                    openai_key=args.openai_key,
+                    multiple_models=multiple_models,
+                )
             elapsed_seconds = time.perf_counter() - model_start_time
-            model_memory_end_mb = current_memory_mb()
-            model_memory_peak_mb = max(model_memory_start_mb, model_memory_end_mb)
+            model_memory_end_mb = memory_monitor.end_mb
+            model_memory_peak_mb = memory_monitor.peak_mb
             print(f"Tempo total do modelo {model_name}: {elapsed_summary(elapsed_seconds)}")
             print(
                 f"Memória total do modelo {model_name}: "
                 f"início {model_memory_start_mb:.2f} MB | fim {model_memory_end_mb:.2f} MB | "
-                f"peak aprox. {model_memory_peak_mb:.2f} MB | delta {model_memory_end_mb - model_memory_start_mb:.2f} MB"
+                f"pico {model_memory_peak_mb:.2f} MB | pico_delta {memory_monitor.peak_delta_mb:.2f} MB"
             )
             manifest.append(
                 add_memory_to_manifest(
@@ -748,25 +792,26 @@ def main() -> None:
             model_memory_start_mb = current_memory_mb()
 
             print(f"Gerando embeddings da query com o modelo: {model_name}")
-            query_files = process_side_by_municipality(
-                df=df_query,
-                columns=query_columns,
-                municipality_column=query_municipality_column,
-                output_dir=args.output_dir,
-                side="query",
-                model_name=model_name,
-                batch_size=args.batch_size,
-                openai_key=args.openai_key,
-                multiple_models=multiple_models,
-            )
+            with PeakMemoryMonitor() as memory_monitor:
+                query_files = process_side_by_municipality(
+                    df=df_query,
+                    columns=query_columns,
+                    municipality_column=query_municipality_column,
+                    output_dir=args.output_dir,
+                    side="query",
+                    model_name=model_name,
+                    batch_size=args.batch_size,
+                    openai_key=args.openai_key,
+                    multiple_models=multiple_models,
+                )
             elapsed_seconds = time.perf_counter() - model_start_time
-            model_memory_end_mb = current_memory_mb()
-            model_memory_peak_mb = max(model_memory_start_mb, model_memory_end_mb)
+            model_memory_end_mb = memory_monitor.end_mb
+            model_memory_peak_mb = memory_monitor.peak_mb
             print(f"Tempo total do modelo {model_name}: {elapsed_summary(elapsed_seconds)}")
             print(
                 f"Memória total do modelo {model_name}: "
                 f"início {model_memory_start_mb:.2f} MB | fim {model_memory_end_mb:.2f} MB | "
-                f"peak aprox. {model_memory_peak_mb:.2f} MB | delta {model_memory_end_mb - model_memory_start_mb:.2f} MB"
+                f"pico {model_memory_peak_mb:.2f} MB | pico_delta {memory_monitor.peak_delta_mb:.2f} MB"
             )
             manifest.append(
                 add_memory_to_manifest(
