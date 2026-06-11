@@ -28,6 +28,8 @@ def get_data_dir_candidates() -> List[str]:
 DATA_DIR_CANDIDATES = get_data_dir_candidates()
 DATA_DIR = DATA_DIR_CANDIDATES[0]
 
+if THIS_DIR not in sys.path:
+    sys.path.insert(0, THIS_DIR)
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
