@@ -7,9 +7,39 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE_LINKTRANSFORMER="${LINKTRANSFORMER_IMAGE:-localhost/projeto-mestrado-linktransformer:latest}"
 IMAGE_SCANN="${SCANN_IMAGE:-localhost/projeto-mestrado-scann:latest}"
 CONTAINER_DATA_DIR="${LINKTRANSFORMER_DATA_DIR:-/workspace/data}"
-RESULTS_DIR_NAME="resultados_$(date +%d%m%Y%H%M%S)"
-RESULTS_DIR="$SCRIPT_DIR/$RESULTS_DIR_NAME"
-CONTAINER_RESULTS_DIR="/workspace/$RESULTS_DIR_NAME"
+HOST_RESULTS_DIR_INPUT="${LINKTRANSFORMER_RESULTS_DIR:-}"
+
+if [[ -n "${HOST_RESULTS_DIR_INPUT}" ]]; then
+  case "${HOST_RESULTS_DIR_INPUT}" in
+    /workspace/*)
+      REL_RESULTS_DIR="${HOST_RESULTS_DIR_INPUT#/workspace/}"
+      RESULTS_DIR="${PROJECT_ROOT}/${REL_RESULTS_DIR}"
+      CONTAINER_RESULTS_DIR="${HOST_RESULTS_DIR_INPUT}"
+      ;;
+    /*)
+      RESULTS_DIR="${HOST_RESULTS_DIR_INPUT}"
+      case "${RESULTS_DIR}" in
+        "${PROJECT_ROOT}"/*)
+          REL_RESULTS_DIR="${RESULTS_DIR#"${PROJECT_ROOT}/"}"
+          CONTAINER_RESULTS_DIR="/workspace/${REL_RESULTS_DIR}"
+          ;;
+        *)
+          echo "Erro: LINKTRANSFORMER_RESULTS_DIR absoluto precisa estar dentro de ${PROJECT_ROOT}." >&2
+          echo "Use um caminho relativo, /workspace/... ou um caminho absoluto dentro do projeto." >&2
+          exit 1
+          ;;
+      esac
+      ;;
+    *)
+      RESULTS_DIR="${PROJECT_ROOT}/${HOST_RESULTS_DIR_INPUT}"
+      CONTAINER_RESULTS_DIR="/workspace/${HOST_RESULTS_DIR_INPUT}"
+      ;;
+  esac
+else
+  RESULTS_DIR_NAME="resultados_$(date +%d%m%Y%H%M%S)"
+  RESULTS_DIR="$SCRIPT_DIR/$RESULTS_DIR_NAME"
+  CONTAINER_RESULTS_DIR="/workspace/$RESULTS_DIR_NAME"
+fi
 
 if ! command -v podman >/dev/null 2>&1; then
   echo "Erro: podman não está instalado ou não está disponível no PATH." >&2

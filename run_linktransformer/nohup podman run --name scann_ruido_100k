@@ -1,0 +1,12 @@
+nohup podman run --name scann_ruido_100k --replace --rm \
+  --userns=keep-id \
+  --user "$(id -u):$(id -g)" \
+  -e LINKTRANSFORMER_DATA_DIR="/workspace/experimento_ruido/100k/exec_match" \
+  -e LINKTRANSFORMER_RESULTS_DIR="/workspace/resultados_ruido/100k" \
+  -v "$PWD:/workspace:Z" \
+  -w /workspace \
+  localhost/projeto-mestrado-scann:latest \
+  python /workspace/run_linktransformer/main_scann.py \
+    --scope geral \
+    --model "sentence-transformers/all-MiniLM-L6-v2" \
+  > "$PWD/logs_nohup/scann_100k_podman.log" 2>&1 &
