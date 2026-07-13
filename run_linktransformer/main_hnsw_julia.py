@@ -17,6 +17,7 @@ from main_linktransformer import (  # noqa: E402
     load_input_data,
     prepare_dataframes,
 )
+from linktransformer.global_chunking import release_native_memory  # noqa: E402
 from linktransformer.infer_main import (  # noqa: E402
     merge_knn_hnsw_julia,
     merge_knn_hnsw_julia_global,
@@ -52,6 +53,7 @@ def main() -> None:
                 merge_knn_hnsw_julia_global(k, df1, df2, suffixes, modelo)
             else:
                 merge_knn_hnsw_julia(k, df1, df2, suffixes, modelo)
+            release_native_memory()
 
 
 if __name__ == "__main__":

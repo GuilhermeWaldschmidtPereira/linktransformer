@@ -20,6 +20,7 @@ from main_linktransformer import (  # noqa: E402
     load_input_data,
     prepare_dataframes,
 )
+from linktransformer.global_chunking import release_native_memory  # noqa: E402
 from linktransformer.infer_main import merge_knn_nmslib, merge_knn_nmslib_global  # noqa: E402
 from model_selection import (  # noqa: E402
     MODELOS_A_UTILIZAR,
@@ -52,6 +53,7 @@ def main() -> None:
                 merge_knn_nmslib_global(k, df1, df2, suffixes, modelo)
             else:
                 merge_knn_nmslib(k, df1, df2, suffixes, modelo)
+            release_native_memory()
 
 
 if __name__ == "__main__":

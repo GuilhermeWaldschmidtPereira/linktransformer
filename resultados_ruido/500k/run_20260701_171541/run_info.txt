@@ -1,0 +1,14 @@
+run_timestamp=20260701_171541
+results_dir=/home/guilherme_pereira/projeto_mestrado/linktransformer/resultados_ruido/500k/run_20260701_171541
+container_results_dir=/workspace/resultados_ruido/500k/run_20260701_171541
+results_layout=nested
+data_dir=experimento_ruido/500k/exec_match
+global_chunked=1
+global_base_chunk_size=50000
+global_query_batch_size=10000
+base_csv=
+query_csv=
+image_linktransformer=localhost/projeto-mestrado-linktransformer:latest
+image_scann=localhost/projeto-mestrado-scann:latest
+args=--scope geral --model sentence-transformers/all-mpnet-base-v2
+overall_status=success

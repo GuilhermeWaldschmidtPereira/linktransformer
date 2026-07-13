@@ -1,0 +1,64 @@
+nohup: ignorando entrada
+>>> Resultados desta execução serão salvos em: /home/guilherme_pereira/projeto_mestrado/linktransformer/resultados_08062026201749
+>>> Embeddings serão lidos em: /workspace/data
+>>> Rodando LinkTransformer sem ScaNN via Podman...
+2026-06-08 23:19:41 - Loading faiss with AVX512 support.
+2026-06-08 23:19:41 - Successfully loaded faiss with AVX512 support.
+>>> Script em execução: /workspace/run_linktransformer/main_linktransformer.py
+>>> Modelos configurados: ['sentence-transformers/all-MiniLM-L6-v2', 'sentence-transformers/all-mpnet-base-v2']
+>>> Lendo CSVs
+    base = /workspace/data/base.csv
+    query = /workspace/data/query.csv
+>>> Arquivo /workspace/data/base.csv (1371.23 MB)
+>>> Tentando ler /workspace/data/base.csv com sep=','...
+    Falha com sep=',': ParserError -> Error tokenizing data. C error: Expected 1 fields in line 622294, saw 2
+
+>>> Tentando ler /workspace/data/base.csv com sep=';'...
+    Sucesso! Arquivo lido com sep=';' | linhas=22117259 | colunas=7
+    Usando sep=';' porque encontrou coluna de município.
+>>> Arquivo /workspace/data/query.csv (3.18 MB)
+>>> Tentando ler /workspace/data/query.csv com sep=','...
+    Sucesso! Arquivo lido com sep=',' | linhas=52723 | colunas=1
+>>> Tentando ler /workspace/data/query.csv com sep=';'...
+    Sucesso! Arquivo lido com sep=';' | linhas=52723 | colunas=7
+    Usando sep=';' porque encontrou coluna de município.
+>>> Iniciando processamento do modelo: sentence-transformers/all-MiniLM-L6-v2
+>>> ERRO em main_linktransformer.py: FileNotFoundError: Embeddings pre-computados não encontrados. Execute primeiro o script isolado de embeddings.
+- /workspace/data/embeddings_base_sentence-transformers_all-MiniLM-L6-v2.npy
+- /workspace/data/embeddings_query_sentence-transformers_all-MiniLM-L6-v2.npy
+- /workspace/linktransformer/data/embeddings_base_sentence-transformers_all-MiniLM-L6-v2.npy
+- /workspace/linktransformer/data/embeddings_query_sentence-transformers_all-MiniLM-L6-v2.npy
+- /workspace/data/base/sentence-transformers_all-MiniLM-L6-v2
+- /workspace/data/query/sentence-transformers_all-MiniLM-L6-v2
+- /workspace/linktransformer/data/base/sentence-transformers_all-MiniLM-L6-v2
+- /workspace/linktransformer/data/query/sentence-transformers_all-MiniLM-L6-v2
+Traceback (most recent call last):
+  File "/workspace/run_linktransformer/main_linktransformer.py", line 175, in main
+    assert_embeddings_exist(modelo)
+  File "/workspace/run_linktransformer/main_linktransformer.py", line 81, in assert_embeddings_exist
+    raise FileNotFoundError(
+FileNotFoundError: Embeddings pre-computados não encontrados. Execute primeiro o script isolado de embeddings.
+- /workspace/data/embeddings_base_sentence-transformers_all-MiniLM-L6-v2.npy
+- /workspace/data/embeddings_query_sentence-transformers_all-MiniLM-L6-v2.npy
+- /workspace/linktransformer/data/embeddings_base_sentence-transformers_all-MiniLM-L6-v2.npy
+- /workspace/linktransformer/data/embeddings_query_sentence-transformers_all-MiniLM-L6-v2.npy
+- /workspace/data/base/sentence-transformers_all-MiniLM-L6-v2
+- /workspace/data/query/sentence-transformers_all-MiniLM-L6-v2
+- /workspace/linktransformer/data/base/sentence-transformers_all-MiniLM-L6-v2
+- /workspace/linktransformer/data/query/sentence-transformers_all-MiniLM-L6-v2
+Traceback (most recent call last):
+  File "/workspace/run_linktransformer/main_linktransformer.py", line 193, in <module>
+    main()
+  File "/workspace/run_linktransformer/main_linktransformer.py", line 175, in main
+    assert_embeddings_exist(modelo)
+  File "/workspace/run_linktransformer/main_linktransformer.py", line 81, in assert_embeddings_exist
+    raise FileNotFoundError(
+FileNotFoundError: Embeddings pre-computados não encontrados. Execute primeiro o script isolado de embeddings.
+- /workspace/data/embeddings_base_sentence-transformers_all-MiniLM-L6-v2.npy
+- /workspace/data/embeddings_query_sentence-transformers_all-MiniLM-L6-v2.npy
+- /workspace/linktransformer/data/embeddings_base_sentence-transformers_all-MiniLM-L6-v2.npy
+- /workspace/linktransformer/data/embeddings_query_sentence-transformers_all-MiniLM-L6-v2.npy
+- /workspace/data/base/sentence-transformers_all-MiniLM-L6-v2
+- /workspace/data/query/sentence-transformers_all-MiniLM-L6-v2
+- /workspace/linktransformer/data/base/sentence-transformers_all-MiniLM-L6-v2
+- /workspace/linktransformer/data/query/sentence-transformers_all-MiniLM-L6-v2

@@ -1,0 +1,11 @@
+run_timestamp=20260630_112326
+results_dir=/home/guilherme_pereira/projeto_mestrado/linktransformer/resultados_ruido/25k/run_20260630_112326
+container_results_dir=/workspace/resultados_ruido/25k/run_20260630_112326
+results_layout=nested
+data_dir=experimento_ruido/25k/exec_match
+base_csv=
+query_csv=
+image_linktransformer=localhost/projeto-mestrado-linktransformer:latest
+image_scann=localhost/projeto-mestrado-scann:latest
+args=--scope geral --model sentence-transformers/all-mpnet-base-v2
+overall_status=failure

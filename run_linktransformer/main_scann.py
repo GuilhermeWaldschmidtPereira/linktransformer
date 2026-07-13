@@ -17,7 +17,11 @@ def get_data_dir_candidates() -> List[str]:
     candidates = []
     env_data_dir = os.environ.get("LINKTRANSFORMER_DATA_DIR")
     if env_data_dir:
-        candidates.append(os.path.abspath(env_data_dir))
+        abs_env_data_dir = os.path.abspath(env_data_dir)
+        candidates.append(abs_env_data_dir)
+        parent_dir = os.path.dirname(abs_env_data_dir)
+        if parent_dir and parent_dir != abs_env_data_dir:
+            candidates.append(parent_dir)
     candidates.extend([
         os.path.join(REPO_ROOT, "data"),
         os.path.join(REPO_ROOT, "linktransformer", "data"),
@@ -34,6 +38,7 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from linktransformer.infer_scann import merge_knn_scann, merge_knn_scann_global  # noqa: E402
+from linktransformer.global_chunking import release_native_memory  # noqa: E402
 from model_selection import (  # noqa: E402
     MODELOS_A_UTILIZAR,
     parse_embedding_model_args,
@@ -189,6 +194,7 @@ def main() -> None:
                     merge_knn_scann_global(k, df1, df2, suffixes, modelo)
                 else:
                     merge_knn_scann(k, df1, df2, suffixes, modelo)
+                release_native_memory()
     except Exception as exc:
         print(f">>> ERRO em main_scann.py: {type(exc).__name__}: {exc}", flush=True)
         traceback.print_exc(file=sys.stdout)

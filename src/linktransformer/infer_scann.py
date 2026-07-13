@@ -9,19 +9,24 @@ import numpy as np
 import pandas as pd
 from pandas import DataFrame
 
+from linktransformer.global_chunking import (
+    append_data_dir_candidates,
+    get_global_base_chunk_size,
+    get_global_query_batch_size,
+    init_topk_buffers,
+    iter_row_ranges,
+    merge_topk_buffers,
+    release_native_memory,
+    should_use_chunked_global_search,
+)
 from linktransformer.memory_utils import PeakMemoryMonitor, current_memory_mb
 from linktransformer.utils import *
 
 def get_data_dir_candidates() -> List[str]:
-    candidates = []
-    env_data_dir = os.environ.get("LINKTRANSFORMER_DATA_DIR")
-    if env_data_dir:
-        candidates.append(os.path.abspath(env_data_dir))
-    candidates.extend([
-        os.path.abspath("data"),
-        os.path.abspath(os.path.join("linktransformer", "data")),
-    ])
-    return list(dict.fromkeys(candidates))
+    return append_data_dir_candidates(
+        repo_root=os.path.abspath("."),
+        env_data_dir=os.environ.get("LINKTRANSFORMER_DATA_DIR"),
+    )
 
 
 DATA_DIR_CANDIDATES = get_data_dir_candidates()
@@ -148,10 +153,16 @@ def has_partitioned_embeddings(safe_model: str) -> bool:
     )
 
 
-def load_flat_embeddings(safe_model: str) -> Tuple[np.ndarray, np.ndarray]:
+def load_flat_embeddings(
+    safe_model: str,
+    mmap_mode: Optional[str] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
     embeddings_base_path = get_flat_embeddings_path("base", safe_model)
     embeddings_query_path = get_flat_embeddings_path("query", safe_model)
-    return np.load(embeddings_base_path), np.load(embeddings_query_path)
+    return (
+        np.load(embeddings_base_path, mmap_mode=mmap_mode),
+        np.load(embeddings_query_path, mmap_mode=mmap_mode),
+    )
 
 
 def load_partitioned_embeddings(
@@ -320,6 +331,124 @@ def normalize_embeddings(embeddings: np.ndarray) -> np.ndarray:
     return embeddings / norms
 
 
+def ensure_zero_based_index(df: DataFrame) -> DataFrame:
+    if isinstance(df.index, pd.RangeIndex) and df.index.start == 0 and df.index.step == 1:
+        return df
+    return df.reset_index(drop=True)
+
+
+def run_chunked_global_scann_search(
+    safe_model: str,
+    k: int,
+    builder_factory,
+    search_kwargs: dict,
+) -> Tuple[np.ndarray, np.ndarray, float, float, float, float, dict]:
+    embeddings_base, embeddings_query = load_flat_embeddings(safe_model, mmap_mode="r")
+    num_rows_base = len(embeddings_base)
+    num_rows_query = len(embeddings_query)
+    k_efetivo = min(k, num_rows_base)
+    num_execucoes = get_env_int("SCANN_NUM_EXECUCOES", 1)
+    base_chunk_size = get_global_base_chunk_size(num_rows_base)
+    query_batch_size = get_global_query_batch_size(num_rows_query)
+    base_ranges = list(iter_row_ranges(num_rows_base, base_chunk_size))
+    query_ranges = list(iter_row_ranges(num_rows_query, query_batch_size))
+
+    print(
+        f">>> [ScaNN] Usando processamento global em chunks | "
+        f"base_chunk_size={base_chunk_size} | query_batch_size={query_batch_size} | "
+        f"chunks_base={len(base_ranges)} | lotes_query={len(query_ranges)}",
+        flush=True,
+    )
+
+    exec_scores = []
+    exec_indices = []
+    for _ in range(num_execucoes):
+        scores, indices = init_topk_buffers(
+            num_rows=num_rows_query,
+            k=k_efetivo,
+            prefer_higher_scores=True,
+        )
+        exec_scores.append(scores)
+        exec_indices.append(indices)
+
+    total_index_time = 0.0
+    total_search_times = [0.0 for _ in range(num_execucoes)]
+    peak_index_memory_mb = 0.0
+    peak_search_memory_mb = [0.0 for _ in range(num_execucoes)]
+
+    for chunk_idx, (base_start, base_end) in enumerate(base_ranges, start=1):
+        if chunk_idx == 1 or chunk_idx == len(base_ranges) or chunk_idx % 10 == 0:
+            print(
+                f">>> [ScaNN] Chunk base {chunk_idx}/{len(base_ranges)} | "
+                f"linhas {base_start}-{base_end - 1}",
+                flush=True,
+            )
+
+        base_chunk = np.ascontiguousarray(embeddings_base[base_start:base_end], dtype=np.float32)
+        base_chunk = normalize_embeddings(base_chunk)
+        k_chunk = min(k_efetivo, len(base_chunk))
+
+        start_index_time = time.time()
+        with PeakMemoryMonitor() as memory_monitor:
+            searcher = builder_factory(base_chunk, k_chunk).build()
+        total_index_time += time.time() - start_index_time
+        peak_index_memory_mb = max(peak_index_memory_mb, memory_monitor.peak_delta_mb)
+
+        for exec_idx in range(num_execucoes):
+            print(f">>> [ScaNN] Execução global {exec_idx + 1}/{num_execucoes} | chunk {chunk_idx}", flush=True)
+            for query_start, query_end in query_ranges:
+                query_batch = np.ascontiguousarray(embeddings_query[query_start:query_end], dtype=np.float32)
+                query_batch = normalize_embeddings(query_batch)
+                chunk_search_kwargs = dict(search_kwargs)
+                chunk_search_kwargs["final_num_neighbors"] = k_chunk
+
+                start_search_time = time.time()
+                with PeakMemoryMonitor() as memory_monitor:
+                    chunk_indices, chunk_scores = searcher.search_batched(query_batch, **chunk_search_kwargs)
+                search_time = time.time() - start_search_time
+
+                chunk_indices = np.asarray(chunk_indices, dtype=np.int64) + base_start
+                chunk_scores = np.asarray(chunk_scores, dtype=np.float32)
+
+                merged_scores, merged_indices = merge_topk_buffers(
+                    current_scores=exec_scores[exec_idx][query_start:query_end],
+                    current_indices=exec_indices[exec_idx][query_start:query_end],
+                    candidate_scores=chunk_scores,
+                    candidate_indices=chunk_indices,
+                    k=k_efetivo,
+                    prefer_higher_scores=True,
+                )
+                exec_scores[exec_idx][query_start:query_end] = merged_scores
+                exec_indices[exec_idx][query_start:query_end] = merged_indices
+
+                total_search_times[exec_idx] += search_time
+                peak_search_memory_mb[exec_idx] = max(
+                    peak_search_memory_mb[exec_idx],
+                    memory_monitor.peak_delta_mb,
+                )
+
+        del searcher
+        del base_chunk
+        release_native_memory()
+
+    detailed_rows = {
+        "execucao": list(range(1, num_execucoes + 1)),
+        "tempo_busca": total_search_times,
+        "memoria_usada_busca_MB": peak_search_memory_mb,
+    }
+    avg_search_time = sum(total_search_times) / num_execucoes
+    avg_mem_used_search = sum(peak_search_memory_mb) / num_execucoes
+    return (
+        exec_indices[-1],
+        exec_scores[-1],
+        total_index_time,
+        avg_search_time,
+        peak_index_memory_mb,
+        avg_mem_used_search,
+        detailed_rows,
+    )
+
+
 def merge_knn_scann_global(
     k,
     df1,
@@ -329,29 +458,12 @@ def merge_knn_scann_global(
 ) -> DataFrame:
     safe_model = safe_model_name(model)
     path_resultados_scann = os.path.join(PATH_RESULTADOS, "scann", safe_model)
-    print(f">>> [ScaNN] Carregando embeddings globais do modelo: {model}", flush=True)
-    embeddings1, embeddings2 = load_flat_embeddings(safe_model)
-    embeddings1 = normalize_embeddings(embeddings1)
-    embeddings2 = normalize_embeddings(embeddings2)
-    print(
-        f">>> [ScaNN] Embeddings carregados | base={embeddings1.shape} | query={embeddings2.shape}",
-        flush=True,
-    )
-
-    df1 = df1.copy().reset_index(drop=True)
-    df2 = df2.copy().reset_index(drop=True)
+    df1 = ensure_zero_based_index(df1)
+    df2 = ensure_zero_based_index(df2)
     k_efetivo = min(k, len(df1))
     num_execucoes = get_env_int("SCANN_NUM_EXECUCOES", 1)
-    query_batch_size = get_env_int("SCANN_QUERY_BATCH_SIZE", 0)
     leaves_to_search_override = os.environ.get("SCANN_LEAVES_TO_SEARCH")
     pre_reorder_override = os.environ.get("SCANN_PRE_REORDER_NUM_NEIGHBORS")
-
-    start_index_time = time.time()
-    with PeakMemoryMonitor() as memory_monitor:
-        builder = build_scann_searcher(embeddings1, k_efetivo)
-        searcher = builder.build()
-    index_time = time.time() - start_index_time
-    mem_used_create_index = memory_monitor.peak_delta_mb
 
     search_kwargs = {"final_num_neighbors": k_efetivo}
     if leaves_to_search_override not in (None, ""):
@@ -359,41 +471,70 @@ def merge_knn_scann_global(
     if pre_reorder_override not in (None, ""):
         search_kwargs["pre_reorder_num_neighbors"] = int(pre_reorder_override)
 
-    dict_ = {"execucao": [], "tempo_busca": [], "memoria_usada_busca_MB": []}
-    soma_tempo_busca = 0.0
-    soma_memoria_busca = 0.0
-    I = None
-    D = None
-    for i in range(num_execucoes):
-        print(f">>> [ScaNN] Execução global {i + 1}/{num_execucoes}", flush=True)
-        start_search_time = time.time()
+    if should_use_chunked_global_search(len(df1)):
+        builder_factory = lambda base_chunk, k_chunk: build_scann_searcher(base_chunk, k_chunk)
+        I, D, index_time, avg_search_time, mem_used_create_index, avg_mem_used_search, dict_ = (
+            run_chunked_global_scann_search(
+                safe_model=safe_model,
+                k=k,
+                builder_factory=builder_factory,
+                search_kwargs=search_kwargs,
+            )
+        )
+    else:
+        print(f">>> [ScaNN] Carregando embeddings globais do modelo: {model}", flush=True)
+        embeddings1, embeddings2 = load_flat_embeddings(safe_model)
+        embeddings1 = normalize_embeddings(embeddings1)
+        embeddings2 = normalize_embeddings(embeddings2)
+        print(
+            f">>> [ScaNN] Embeddings carregados | base={embeddings1.shape} | query={embeddings2.shape}",
+            flush=True,
+        )
+
+        query_batch_size = get_env_int("SCANN_QUERY_BATCH_SIZE", 0)
+        start_index_time = time.time()
         with PeakMemoryMonitor() as memory_monitor:
-            if query_batch_size > 0:
-                result_indices = []
-                result_distances = []
-                for start_idx in range(0, len(embeddings2), query_batch_size):
-                    end_idx = min(start_idx + query_batch_size, len(embeddings2))
-                    chunk_I, chunk_D = searcher.search_batched(
-                        embeddings2[start_idx:end_idx],
-                        **search_kwargs,
-                    )
-                    result_indices.append(chunk_I)
-                    result_distances.append(chunk_D)
-                I = np.vstack(result_indices)
-                D = np.vstack(result_distances)
-            else:
-                I, D = searcher.search_batched(embeddings2, **search_kwargs)
-        search_time = time.time() - start_search_time
-        mem_used_search = memory_monitor.peak_delta_mb
+            builder = build_scann_searcher(embeddings1, k_efetivo)
+            searcher = builder.build()
+        index_time = time.time() - start_index_time
+        mem_used_create_index = memory_monitor.peak_delta_mb
 
-        soma_tempo_busca += search_time
-        soma_memoria_busca += mem_used_search
-        dict_["execucao"].append(i + 1)
-        dict_["tempo_busca"].append(search_time)
-        dict_["memoria_usada_busca_MB"].append(mem_used_search)
+        dict_ = {"execucao": [], "tempo_busca": [], "memoria_usada_busca_MB": []}
+        soma_tempo_busca = 0.0
+        soma_memoria_busca = 0.0
+        I = None
+        D = None
+        for i in range(num_execucoes):
+            print(f">>> [ScaNN] Execução global {i + 1}/{num_execucoes}", flush=True)
+            start_search_time = time.time()
+            with PeakMemoryMonitor() as memory_monitor:
+                if query_batch_size > 0:
+                    result_indices = []
+                    result_distances = []
+                    for start_idx in range(0, len(embeddings2), query_batch_size):
+                        end_idx = min(start_idx + query_batch_size, len(embeddings2))
+                        chunk_I, chunk_D = searcher.search_batched(
+                            embeddings2[start_idx:end_idx],
+                            **search_kwargs,
+                        )
+                        result_indices.append(chunk_I)
+                        result_distances.append(chunk_D)
+                    I = np.vstack(result_indices)
+                    D = np.vstack(result_distances)
+                else:
+                    I, D = searcher.search_batched(embeddings2, **search_kwargs)
+            search_time = time.time() - start_search_time
+            mem_used_search = memory_monitor.peak_delta_mb
 
-    avg_search_time = soma_tempo_busca / num_execucoes
-    avg_mem_used_search = soma_memoria_busca / num_execucoes
+            soma_tempo_busca += search_time
+            soma_memoria_busca += mem_used_search
+            dict_["execucao"].append(i + 1)
+            dict_["tempo_busca"].append(search_time)
+            dict_["memoria_usada_busca_MB"].append(mem_used_search)
+
+        avg_search_time = soma_tempo_busca / num_execucoes
+        avg_mem_used_search = soma_memoria_busca / num_execucoes
+
     df_lm_matched = build_matches_global(df1, df2, I, k_efetivo, suffixes, D)
 
     df_tempos_busca_scann = pd.DataFrame(dict_)

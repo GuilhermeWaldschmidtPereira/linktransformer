@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import gc
 import os
 import sys
 import traceback
@@ -17,7 +18,11 @@ def get_data_dir_candidates() -> List[str]:
     candidates = []
     env_data_dir = os.environ.get("LINKTRANSFORMER_DATA_DIR")
     if env_data_dir:
-        candidates.append(os.path.abspath(env_data_dir))
+        abs_env_data_dir = os.path.abspath(env_data_dir)
+        candidates.append(abs_env_data_dir)
+        parent_dir = os.path.dirname(abs_env_data_dir)
+        if parent_dir and parent_dir != abs_env_data_dir:
+            candidates.append(parent_dir)
     candidates.extend([
         os.path.join(REPO_ROOT, "data"),
         os.path.join(REPO_ROOT, "linktransformer", "data"),
@@ -39,6 +44,7 @@ from linktransformer.infer_main import (  # noqa: E402
     merge_knn2,
     merge_knn2_global,
 )
+from linktransformer.global_chunking import release_native_memory  # noqa: E402
 from model_selection import (  # noqa: E402
     MODELOS_A_UTILIZAR,
     parse_embedding_model_args,
@@ -162,6 +168,11 @@ def prepare_dataframes(df_base: pd.DataFrame, df_query: pd.DataFrame):
     return df1, df2
 
 
+def cleanup_between_methods() -> None:
+    gc.collect()
+    release_native_memory()
+
+
 def main() -> None:
     args = parse_embedding_model_args(
         "Executa a indexacao baseline/SVS com embeddings pre-computados.",
@@ -193,10 +204,14 @@ def main() -> None:
                 )
                 if args.scope == "geral":
                     merge_knn_global(k, df1, df2, suffixes, modelo)
+                    cleanup_between_methods()
                     merge_knn2_global(k, df1, df2, suffixes, modelo)
+                    cleanup_between_methods()
                 else:
                     merge_knn(k, df1, df2, suffixes, modelo)
+                    cleanup_between_methods()
                     merge_knn2(k, df1, df2, suffixes, modelo)
+                    cleanup_between_methods()
     except Exception as exc:
         print(f">>> ERRO em main_linktransformer.py: {type(exc).__name__}: {exc}", flush=True)
         traceback.print_exc(file=sys.stdout)

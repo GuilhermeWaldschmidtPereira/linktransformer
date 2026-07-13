@@ -1,0 +1,3 @@
+STEP 1/17: FROM python:3.10-slim
+Resolved "python" as an alias (/etc/containers/registries.conf.d/shortnames.conf)
+Trying to pull docker.io/library/python:3.10-slim...
