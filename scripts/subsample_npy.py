@@ -6,8 +6,9 @@ do arquivo original. Por padrão grava 200000 registros. Suporta amostragem
 aleatória sem reposição com `--random`.
 
 Exemplos:
-  python3 scripts/subsample_npy.py data/embeddings_base.npy out.npy
-  python3 scripts/subsample_npy.py data/embeddings_base.npy out.npy --n 200000 --random --seed 42
+  python3 scripts/subsample_npy.py ../dados_nordeste/embeddings_base_sentence-transformers_all-MiniLM-L6-v2_copia.npy embeddings_base_sentence-transformers_all-MiniLM-L6-v2.npy
+  python3 scripts/subsample_npy.py ../dados_nordeste/embeddings_base_sentence-transformers_all-MiniLM-L6-v2_copia.npy embeddings_base_sentence-transformers_all-mpnet-base-v2_copia.npy
+  python3 scripts/subsample_npy.py ../dados_nordeste/embeddings_base.npy out.npy --n 200000 --random --seed 42
 """
 from __future__ import annotations
 import argparse
