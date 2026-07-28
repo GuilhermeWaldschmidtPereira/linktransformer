@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Subamostra um arquivo .npy")
     p.add_argument("input", help="Caminho para o arquivo .npy de entrada")
     p.add_argument("output", help="Caminho do .npy de saída")
-    p.add_argument("--n", type=int, default=200_000, help="Número de registros desejados (padrão: 200000)")
+    p.add_argument("--n", type=int, default=400_000, help="Número de registros desejados (padrão: 200000)")
     p.add_argument("--random", action="store_true", help="Amostragem aleatória sem reposição (por padrão pega os primeiros N)")
     p.add_argument("--seed", type=int, default=None, help="Semente RNG (apenas quando --random)")
     return p.parse_args()
