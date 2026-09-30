@@ -81,6 +81,14 @@ def get_env_int(name: str, default: int) -> int:
     return int(value)
 
 
+def get_num_execucoes_busca() -> int:
+    default = get_env_int("NUM_EXECUCOES_BUSCA", 1)
+    num_execucoes = get_env_int("SCANN_NUM_EXECUCOES", default)
+    if num_execucoes < 1:
+        raise ValueError("SCANN_NUM_EXECUCOES deve ser um inteiro maior ou igual a 1")
+    return num_execucoes
+
+
 def get_env_float(name: str, default: float) -> float:
     value = os.environ.get(name)
     if value is None or value == "":
@@ -341,7 +349,7 @@ def merge_knn_scann_global(
     df1 = df1.copy().reset_index(drop=True)
     df2 = df2.copy().reset_index(drop=True)
     k_efetivo = min(k, len(df1))
-    num_execucoes = get_env_int("SCANN_NUM_EXECUCOES", 1)
+    num_execucoes = get_num_execucoes_busca()
     query_batch_size = get_env_int("SCANN_QUERY_BATCH_SIZE", 0)
     leaves_to_search_override = os.environ.get("SCANN_LEAVES_TO_SEARCH")
     pre_reorder_override = os.environ.get("SCANN_PRE_REORDER_NUM_NEIGHBORS")
@@ -485,7 +493,7 @@ def merge_knn_scann(
         embeddings2 = embeddings2 / np.linalg.norm(embeddings2, axis=1, keepdims=True)
         print(">>> [ScaNN] Normalização concluída.", flush=True)
 
-    num_execucoes = get_env_int("SCANN_NUM_EXECUCOES", 1)
+    num_execucoes = get_num_execucoes_busca()
     query_batch_size = get_env_int("SCANN_QUERY_BATCH_SIZE", 0)
     leaves_to_search_override = os.environ.get("SCANN_LEAVES_TO_SEARCH")
     pre_reorder_override = os.environ.get("SCANN_PRE_REORDER_NUM_NEIGHBORS")

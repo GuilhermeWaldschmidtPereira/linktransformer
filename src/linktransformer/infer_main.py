@@ -44,7 +44,9 @@ def build_results_dir() -> str:
 
 PATH_RESULTADOS = build_results_dir()
 
-NUM_EXECUCOES_BUSCA = 1
+NUM_EXECUCOES_BUSCA = int(os.environ.get("NUM_EXECUCOES_BUSCA") or "1")
+if NUM_EXECUCOES_BUSCA < 1:
+    raise ValueError("NUM_EXECUCOES_BUSCA deve ser um inteiro maior ou igual a 1")
 
 if not os.path.exists(PATH_RESULTADOS):
     os.makedirs(PATH_RESULTADOS)

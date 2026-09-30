@@ -425,9 +425,16 @@ Depois dos benchmarks, você deve encontrar:
 - `HOST_DATA_DIR`: diretório host montado como `/data` no container de embeddings
 - `LINKTRANSFORMER_BASE_CSV`: override do CSV base nos benchmarks
 - `LINKTRANSFORMER_QUERY_CSV`: override do CSV query nos benchmarks
+- `NUM_EXECUCOES_BUSCA`: número de execuções de busca por indexador (padrão: `1`)
 - `SCANN_BUILDER_MODE`: `brute_force` ou `tree_ah`
-- `SCANN_NUM_EXECUCOES`: repetições da busca no ScaNN
+- `SCANN_NUM_EXECUCOES`: sobrescreve `NUM_EXECUCOES_BUSCA` especificamente no ScaNN
 - `SCANN_QUERY_BATCH_SIZE`: tamanho do lote de queries no ScaNN
+
+Exemplo para executar cada busca três vezes:
+
+```bash
+NUM_EXECUCOES_BUSCA=3 ./main.sh --scope geral --model sentence-transformers/all-mpnet-base-v2
+```
 
 ## Observações importantes
 

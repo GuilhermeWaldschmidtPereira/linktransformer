@@ -62,6 +62,7 @@ echo ">>> Rodando LinkTransformer sem ScaNN via Podman..."
 podman run --rm \
   --userns=keep-id \
   --user "$(id -u):$(id -g)" \
+  -e NUM_EXECUCOES_BUSCA \
   -e LINKTRANSFORMER_RESULTS_DIR="$CONTAINER_RESULTS_DIR" \
   -e LINKTRANSFORMER_DATA_DIR="$CONTAINER_DATA_DIR" \
   -v "${PROJECT_ROOT}:/workspace:Z" \
@@ -73,6 +74,7 @@ echo ">>> Rodando NMSLIB via Podman..."
 podman run --rm \
   --userns=keep-id \
   --user "$(id -u):$(id -g)" \
+  -e NUM_EXECUCOES_BUSCA \
   -e LINKTRANSFORMER_RESULTS_DIR="$CONTAINER_RESULTS_DIR" \
   -e LINKTRANSFORMER_DATA_DIR="$CONTAINER_DATA_DIR" \
   -v "${PROJECT_ROOT}:/workspace:Z" \
@@ -84,6 +86,7 @@ echo ">>> Rodando HNSW Julia via Podman..."
 podman run --rm \
   --userns=keep-id \
   --user "$(id -u):$(id -g)" \
+  -e NUM_EXECUCOES_BUSCA \
   -e LINKTRANSFORMER_RESULTS_DIR="$CONTAINER_RESULTS_DIR" \
   -e LINKTRANSFORMER_DATA_DIR="$CONTAINER_DATA_DIR" \
   -v "${PROJECT_ROOT}:/workspace:Z" \
@@ -95,6 +98,7 @@ echo ">>> Rodando ScaNN via Podman (imagem dedicada)..."
 podman run --rm \
   --userns=keep-id \
   --user "$(id -u):$(id -g)" \
+  -e NUM_EXECUCOES_BUSCA \
   -e LINKTRANSFORMER_RESULTS_DIR="$CONTAINER_RESULTS_DIR" \
   -e LINKTRANSFORMER_DATA_DIR="$CONTAINER_DATA_DIR" \
   -e SCANN_BUILDER_MODE \
