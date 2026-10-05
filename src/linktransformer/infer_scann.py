@@ -425,7 +425,7 @@ def merge_knn_scann_global(
         "index_time": [index_time],
         "search_time": [avg_search_time],
         "total_time": [index_time + avg_search_time],
-        "num_rows_df1": [len(df1)],
+        "num_rows_df1": [len(embeddings1)],
         "num_rows_df2": [len(df2)],
         "k": [k],
         "mem_used_indexation_MB": [mem_used_create_index],
