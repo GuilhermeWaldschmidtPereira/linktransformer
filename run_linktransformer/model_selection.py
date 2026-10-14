@@ -82,4 +82,13 @@ def parse_embedding_model_args(
             "com um indice por municipio. 'geral' cria um indice unico para toda a base."
         ),
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--k",
+        type=int,
+        default=1,
+        help="Quantidade de vizinhos mais próximos por query (padrão: 1).",
+    )
+    args = parser.parse_args(argv)
+    if args.k < 1:
+        parser.error("--k deve ser um inteiro maior ou igual a 1")
+    return args

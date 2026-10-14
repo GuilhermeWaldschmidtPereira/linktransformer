@@ -1,0 +1,24 @@
+RELATORIO DE CONSOLIDACAO DE RESULTADOS
+Gerado em: 2026-10-12T01:24:38
+Diretorio raiz: /home/guilherme_pereira/projeto_mestrado/linktransformer/resultados_ruido
+Padrao autorizado: ^base_(10k|25k|50k|70k|100k|200k|300k|500k)_query_(10k|25k|100k|500k)_20261006_114754$
+Pastas de execucao encontradas/processadas: 32/32 esperadas
+Pastas esperadas ausentes: 0
+CSVs lidos com sucesso: 320/320 esperados
+CSVs ausentes: 0
+CSVs vazios/sem dados: 0
+CSVs ilegiveis: 0
+Variantes de cabecalho: 1
+Cabecalho de referencia: base_10k_query_10k_20261006_114754/baseline/sentence-transformers_all-MiniLM-L6-v2/csv_final_tempos_buscas.csv
+Colunas de tamanho da base: []
+Colunas de tamanho da query: []
+Grupos de divergencias de tamanho: 0
+Problemas de formato: 0
+Linhas de dados lidas: 960
+Linhas de dados escritas: 960
+Linhas verificadas no arquivo final: 960
+Cabecalho final confere: True
+Fontes limitadas as pastas autorizadas: True
+Conversao dos tamanhos base/query para inteiros conferida pelo nome da pasta: True
+Consolidado: /home/guilherme_pereira/projeto_mestrado/linktransformer/resultados_ruido/resultados_consolidados_20261006_114754.csv
+Relatorio: /home/guilherme_pereira/projeto_mestrado/linktransformer/resultados_ruido/relatorio_verificacao_consolidacao_20261006_114754.txt

@@ -422,9 +422,10 @@ Depois dos benchmarks, você deve encontrar:
 
 - `LINKTRANSFORMER_IMAGE`: nome da imagem principal
 - `SCANN_IMAGE`: nome da imagem de ScaNN
-- `HOST_DATA_DIR`: diretório host montado como `/data` no container de embeddings
+- `HOST_DATA_DIR`: diretório host mont]ado como `/data` no container de embeddings
 - `LINKTRANSFORMER_BASE_CSV`: override do CSV base nos benchmarks
 - `LINKTRANSFORMER_QUERY_CSV`: override do CSV query nos benchmarks
+- `--k`: quantidade de vizinhos mais próximos por query (padrão: `1`)
 - `NUM_EXECUCOES_BUSCA`: número de execuções de busca por indexador (padrão: `1`)
 - `SCANN_BUILDER_MODE`: `brute_force` ou `tree_ah`
 - `SCANN_NUM_EXECUCOES`: sobrescreve `NUM_EXECUCOES_BUSCA` especificamente no ScaNN
@@ -434,6 +435,12 @@ Exemplo para executar cada busca três vezes:
 
 ```bash
 NUM_EXECUCOES_BUSCA=3 ./main.sh --scope geral --model sentence-transformers/all-mpnet-base-v2
+```
+
+Para retornar os três vizinhos mais próximos por query:
+
+```bash
+./main.sh --scope geral --k 3 --model sentence-transformers/all-mpnet-base-v2
 ```
 
 ## Observações importantes

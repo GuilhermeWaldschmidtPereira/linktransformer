@@ -171,8 +171,7 @@ def main() -> None:
         df_base, df_query = load_input_data()
         suffixes = ("_x", "_y")
 
-        # Mantém o comportamento anterior de range(2) com i > 0, que executava apenas k=1.
-        ks = [1]
+        ks = [args.k]
 
         for modelo in modelos_a_executar:
             print(f">>> Iniciando processamento do modelo: {modelo}", flush=True)

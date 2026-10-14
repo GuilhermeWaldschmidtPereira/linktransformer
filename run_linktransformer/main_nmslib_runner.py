@@ -40,7 +40,7 @@ def main() -> None:
 
     df_base, df_query = load_input_data()
     suffixes = ("_x", "_y")
-    ks = [1]
+    ks = [args.k]
 
     for modelo in modelos_a_executar:
         assert_embeddings_exist(modelo, args.scope)
