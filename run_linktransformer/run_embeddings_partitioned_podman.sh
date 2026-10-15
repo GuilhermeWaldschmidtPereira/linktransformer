@@ -5,8 +5,9 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${THIS_DIR}/.." && pwd)"
 IMAGE_NAME="${IMAGE_NAME:-}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-}"
-REQ_HASH="$(sha256sum "${REPO_ROOT}/requirements-embeddings.txt" | awk '{print substr($1,1,16)}')"
+BASE_IMAGE_HASH="$(sha256sum "${REPO_ROOT}/requirements-embeddings.txt" "${REPO_ROOT}/Containerfile.embeddings.base" | sha256sum | awk '{print substr($1,1,16)}')"
 BASE_IMAGE_NAME="${BASE_IMAGE_NAME:-}"
+GPU_DEVICE="${GPU_DEVICE:-}"
 HOST_DATA_DIR="${HOST_DATA_DIR:-${REPO_ROOT}/data}"
 CONTAINER_DATA_DIR="${CONTAINER_DATA_DIR:-/data}"
 
@@ -31,9 +32,18 @@ fi
 
 if [[ -z "${BASE_IMAGE_NAME}" ]]; then
   if [[ "${CONTAINER_RUNTIME}" == "podman" ]]; then
-    BASE_IMAGE_NAME="localhost/linktransformer-embeddings-base:${REQ_HASH}"
+    BASE_IMAGE_NAME="localhost/linktransformer-embeddings-base:${BASE_IMAGE_HASH}"
   else
-    BASE_IMAGE_NAME="linktransformer-embeddings-base:${REQ_HASH}"
+    BASE_IMAGE_NAME="linktransformer-embeddings-base:${BASE_IMAGE_HASH}"
+  fi
+fi
+
+GPU_ARGS=()
+if [[ -n "${GPU_DEVICE}" ]]; then
+  if [[ "${CONTAINER_RUNTIME}" == "podman" ]]; then
+    GPU_ARGS=(--device "nvidia.com/gpu=${GPU_DEVICE}")
+  else
+    GPU_ARGS=(--gpus "device=${GPU_DEVICE}")
   fi
 fi
 
@@ -60,6 +70,7 @@ fi
   "${REPO_ROOT}"
 
 "${CONTAINER_RUNTIME}" run --rm \
+  "${GPU_ARGS[@]}" \
   -v "${VOLUME_MOUNT}" \
   "${IMAGE_NAME}" \
   --base-path "${CONTAINER_DATA_DIR}/base.csv" \
