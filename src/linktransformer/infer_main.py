@@ -572,6 +572,228 @@ def merge_knn_nmslib_global(k, df1, df2, suffixes, model) -> DataFrame:
     )
     return df_lm_matched
 
+def _build_cuhnsw_index(embeddings: np.ndarray):
+    try:
+        from cuhnsw import CuHNSW
+    except ImportError as exc:
+        raise ImportError(
+            "O backend cuhnsw requer o pacote compilado com CUDA. "
+            "Use Containerfile.cuhnsw e execute o container com acesso a GPU."
+        ) from exc
+
+    options = {
+        "dist_type": "cosine",
+        "nrz": True,
+        "ef_construction": int(os.environ.get("CUHNSW_EF_CONSTRUCTION", "150")),
+        "hyper_threads": int(os.environ.get("CUHNSW_HYPER_THREADS", "100")),
+        "block_dim": 32,
+        "reverse_cand": False,
+        "heuristic_coef": 0.0,
+    }
+    index = CuHNSW(options)
+    index.set_data(np.ascontiguousarray(embeddings, dtype=np.float32))
+    index.build()
+    return index
+
+
+def _search_cuhnsw(index, embeddings_base, embeddings_query, k):
+    ef_search = max(k, int(os.environ.get("CUHNSW_EF_SEARCH", "300")))
+    neighbors, _, found_counts = index.search_knn(embeddings_query, k, ef_search)
+    neighbors = np.asarray(neighbors, dtype=np.int64)
+    found_counts = np.asarray(found_counts, dtype=np.int64).reshape(-1)
+    if neighbors.ndim != 2 or len(found_counts) != len(embeddings_query):
+        raise ValueError("Formato inesperado retornado por CuHNSW.search_knn")
+
+    result_k = min(k, int(found_counts.min())) if len(found_counts) else 0
+    if result_k < 1:
+        raise ValueError("CuHNSW não encontrou vizinhos para as consultas")
+
+    neighbors = neighbors[:, :result_k]
+    scores = np.empty(neighbors.shape, dtype=np.float32)
+    batch_size = 4096
+    for query_start in range(0, len(embeddings_query), batch_size):
+        query_end = min(query_start + batch_size, len(embeddings_query))
+        query_batch = embeddings_query[query_start:query_end]
+        for neighbor_rank in range(result_k):
+            base_batch = embeddings_base[
+                neighbors[query_start:query_end, neighbor_rank]
+            ]
+            scores[query_start:query_end, neighbor_rank] = np.einsum(
+                "qd,qd->q", base_batch, query_batch
+            )
+    return neighbors, scores, result_k
+
+
+def _merge_knn_cuhnsw(k, df1, df2, suffixes, model, scope):
+    safe_model = safe_model_name(model)
+    use_partitioned = scope == "municipio" and has_partitioned_embeddings(safe_model)
+    if scope == "geral" or not use_partitioned:
+        embeddings_base, embeddings_query = load_global_embeddings(
+            safe_model, normalize=True
+        )
+    else:
+        embeddings_base = embeddings_query = None
+
+    df1 = df1.copy().reset_index(drop=True)
+    df2 = df2.copy().reset_index(drop=True)
+    detailed_rows = {
+        "execucao": [],
+        "tempo_busca": [],
+        "memoria_usada_busca_MB": [],
+    }
+    matched_parts = []
+    result_rows = []
+    total_index_time = 0.0
+    total_search_time = 0.0
+    total_index_memory = 0.0
+    avg_search_memories = []
+
+    if scope == "geral":
+        groups = [(None, np.arange(len(df1)), np.arange(len(df2)))]
+    else:
+        municipio_col = get_municipio_column(df1, df2)
+        groups = []
+        for municipio_id in df2[municipio_col].dropna().drop_duplicates().tolist():
+            base_idx = df1.index[df1[municipio_col] == municipio_id].to_numpy()
+            query_idx = df2.index[df2[municipio_col] == municipio_id].to_numpy()
+            if len(base_idx) and len(query_idx):
+                groups.append((municipio_id, base_idx, query_idx))
+
+    for municipio_id, base_idx, query_idx in groups:
+        k_requested = min(k, len(base_idx))
+        if use_partitioned:
+            group_base = load_partitioned_embeddings(
+                "base", safe_model, municipio_id, len(base_idx)
+            )
+            group_query = load_partitioned_embeddings(
+                "query", safe_model, municipio_id, len(query_idx)
+            )
+            group_base = normalize_embeddings(group_base)
+            group_query = normalize_embeddings(group_query)
+        else:
+            group_base = embeddings_base[base_idx]
+            group_query = embeddings_query[query_idx]
+        group_base = np.ascontiguousarray(group_base, dtype=np.float32)
+        group_query = np.ascontiguousarray(group_query, dtype=np.float32)
+
+        start_index_time = time.time()
+        with PeakMemoryMonitor() as memory_monitor:
+            index = _build_cuhnsw_index(group_base)
+        index_time = time.time() - start_index_time
+        index_memory = memory_monitor.peak_delta_mb
+        total_index_time += index_time
+        total_index_memory += index_memory
+
+        search_time_sum = 0.0
+        search_memory_sum = 0.0
+        neighbors = scores = None
+        result_k = k_requested
+        for execution in range(NUM_EXECUCOES_BUSCA):
+            start_search_time = time.time()
+            with PeakMemoryMonitor() as memory_monitor:
+                neighbors, scores, result_k = _search_cuhnsw(
+                    index, group_base, group_query, k_requested
+                )
+            search_time = time.time() - start_search_time
+            search_memory = memory_monitor.peak_delta_mb
+            search_time_sum += search_time
+            search_memory_sum += search_memory
+            detailed_rows["execucao"].append(execution + 1)
+            detailed_rows["tempo_busca"].append(search_time)
+            detailed_rows["memoria_usada_busca_MB"].append(search_memory)
+
+        avg_search_time = search_time_sum / NUM_EXECUCOES_BUSCA
+        avg_search_memory = search_memory_sum / NUM_EXECUCOES_BUSCA
+        total_search_time += avg_search_time
+        avg_search_memories.append(avg_search_memory)
+
+        if scope == "geral":
+            matched = build_matches_global(
+                df1, df2, neighbors, result_k, suffixes, scores
+            )
+        else:
+            matched = build_matches_por_municipio(
+                df1.iloc[base_idx].reset_index(drop=True),
+                df2.iloc[query_idx].reset_index(drop=True),
+                neighbors,
+                result_k,
+                suffixes,
+                scores,
+            )
+        matched_parts.append(matched)
+        matches = count_setor_matches(matched)
+        result_rows.append({
+            "metodo": "cuhnsw",
+            "modelo_embedding": model,
+            "id_municipio": municipio_id,
+            "index_time": index_time,
+            "search_time": avg_search_time,
+            "total_time": index_time + avg_search_time,
+            "num_rows_df1": len(base_idx),
+            "num_rows_df2": len(query_idx),
+            "quantidade_enderecos_por_municipio": len(base_idx),
+            "quantidade_enderecos_buscados_municipio": len(query_idx),
+            "quantidade_acertos_municipio": matches,
+            "k": k,
+            "k_efetivo": result_k,
+            "mem_used_indexation_MB": index_memory,
+            "avg_mem_used_search_MB": avg_search_memory,
+            "matches": matches,
+        })
+
+    df_matched = pd.concat(matched_parts, ignore_index=True) if matched_parts else pd.DataFrame()
+    avg_search_memory = float(np.mean(avg_search_memories)) if avg_search_memories else 0.0
+    if scope == "geral":
+        save_global_outputs(
+            "cuhnsw", model, safe_model, df1, df2, len(embeddings_base), k,
+            total_index_time, total_search_time, total_index_memory,
+            avg_search_memory, detailed_rows, df_matched,
+            "cuhnsw", "cuhnsw", "matched_cuhnsw_global.csv",
+        )
+    else:
+        append_resultados_por_municipio(pd.DataFrame(result_rows), "cuhnsw")
+        detailed = pd.DataFrame({
+            **detailed_rows,
+            "modelo_index": ["cuhnsw"] * len(detailed_rows["execucao"]),
+            "modelo_embedding": [model] * len(detailed_rows["execucao"]),
+        })
+        append_csv(PATH_RESULTADOS_GERAL, detailed)
+        result_dir = os.path.join(PATH_RESULTADOS, "cuhnsw", safe_model)
+        os.makedirs(result_dir, exist_ok=True)
+        detailed.to_csv(
+            os.path.join(result_dir, "csv_final_tempos_buscas.csv"), index=False
+        )
+        results_file = os.path.join(PATH_RESULTADOS, "resultados.csv")
+        result = pd.DataFrame({
+            "metodo": ["cuhnsw"],
+            "modelo_embedding": [model],
+            "index_time": [total_index_time],
+            "search_time": [total_search_time],
+            "total_time": [total_index_time + total_search_time],
+            "num_rows_df1": [len(df1)],
+            "num_rows_df2": [len(df2)],
+            "k": [k],
+            "mem_used_indexation_MB": [total_index_memory],
+            "avg_mem_used_search_MB": [avg_search_memory],
+            "matches": [count_setor_matches(df_matched)],
+        })
+        result.to_csv(
+            results_file,
+            mode="a" if os.path.exists(results_file) else "w",
+            header=not os.path.exists(results_file),
+            index=False,
+        )
+    return df_matched
+
+
+def merge_knn_cuhnsw_global(k, df1, df2, suffixes, model) -> DataFrame:
+    return _merge_knn_cuhnsw(k, df1, df2, suffixes, model, "geral")
+
+
+def merge_knn_cuhnsw(k, df1, df2, suffixes, model) -> DataFrame:
+    return _merge_knn_cuhnsw(k, df1, df2, suffixes, model, "municipio")
+
+
 def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
     # ================================
     #     INDEXAÇÃO (FAISS)
