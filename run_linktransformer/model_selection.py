@@ -61,6 +61,7 @@ def resolve_embedding_models(selected_models: Optional[Sequence[str]]) -> List[s
 def parse_embedding_model_args(
     description: str,
     argv: Optional[Sequence[str]] = None,
+    include_indexer: bool = False,
 ) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
@@ -88,6 +89,13 @@ def parse_embedding_model_args(
         default=1,
         help="Quantidade de vizinhos mais próximos por query (padrão: 1).",
     )
+    if include_indexer:
+        parser.add_argument(
+            "--indexer",
+            choices=("both", "faiss", "svs"),
+            default="both",
+            help="Seleciona os indexadores a executar.",
+        )
     args = parser.parse_args(argv)
     if args.k < 1:
         parser.error("--k deve ser um inteiro maior ou igual a 1")

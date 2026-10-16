@@ -165,6 +165,7 @@ def prepare_dataframes(df_base: pd.DataFrame, df_query: pd.DataFrame):
 def main() -> None:
     args = parse_embedding_model_args(
         "Executa a indexacao baseline/SVS com embeddings pre-computados.",
+        include_indexer=True,
     )
     modelos_a_executar = resolve_embedding_models(args.models)
 
@@ -172,6 +173,7 @@ def main() -> None:
     print(f">>> Modelos disponiveis: {MODELOS_A_UTILIZAR}", flush=True)
     print(f">>> Modelos selecionados: {modelos_a_executar}", flush=True)
     print(f">>> Escopo selecionado: {args.scope}", flush=True)
+    print(f">>> Indexador selecionado: {args.indexer}", flush=True)
 
     try:
         df_base, df_query = load_input_data()
@@ -191,11 +193,15 @@ def main() -> None:
                     flush=True,
                 )
                 if args.scope == "geral":
-                    merge_knn_global(k, df1, df2, suffixes, modelo)
-                    merge_knn2_global(k, df1, df2, suffixes, modelo)
+                    if args.indexer in {"both", "faiss"}:
+                        merge_knn_global(k, df1, df2, suffixes, modelo)
+                    if args.indexer in {"both", "svs"}:
+                        merge_knn2_global(k, df1, df2, suffixes, modelo)
                 else:
-                    merge_knn(k, df1, df2, suffixes, modelo)
-                    merge_knn2(k, df1, df2, suffixes, modelo)
+                    if args.indexer in {"both", "faiss"}:
+                        merge_knn(k, df1, df2, suffixes, modelo)
+                    if args.indexer in {"both", "svs"}:
+                        merge_knn2(k, df1, df2, suffixes, modelo)
     except Exception as exc:
         print(f">>> ERRO em main_linktransformer.py: {type(exc).__name__}: {exc}", flush=True)
         traceback.print_exc(file=sys.stdout)

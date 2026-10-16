@@ -327,6 +327,35 @@ def save_global_outputs(
         results_df.to_csv(results_file, mode="w", header=True, index=False)
 
 
+def build_faiss_index(embeddings: np.ndarray):
+    index = faiss.IndexFlatIP(embeddings.shape[1])
+    gpu_resources = None
+
+    use_gpu = os.environ.get("FAISS_USE_GPU", "0").strip().lower() in {"1", "true", "yes"}
+    if use_gpu:
+        if not hasattr(faiss, "StandardGpuResources"):
+            raise RuntimeError(
+                "FAISS_USE_GPU está ativado, mas esta instalação do FAISS não tem suporte GPU. "
+                "Construa a imagem com --build-arg FAISS_GPU=1."
+            )
+
+        device_id = int(os.environ.get("FAISS_GPU_DEVICE", "0"))
+        gpu_count = faiss.get_num_gpus()
+        if device_id < 0 or device_id >= gpu_count:
+            raise RuntimeError(
+                f"FAISS_GPU_DEVICE={device_id} inválido; o processo vê {gpu_count} GPU(s)."
+            )
+
+        gpu_resources = faiss.StandardGpuResources()
+        index = faiss.index_cpu_to_gpu(gpu_resources, device_id, index)
+        print(f">>> [FAISS] Índice usando GPU {device_id}", flush=True)
+    else:
+        print(">>> [FAISS] Índice usando CPU", flush=True)
+
+    index.add(embeddings)
+    return index, gpu_resources
+
+
 def merge_knn_global(k, df1, df2, suffixes, model) -> DataFrame:
     safe_model = safe_model_name(model)
     print(f">>> [FAISS] Carregando embeddings globais do modelo: {model}", flush=True)
@@ -341,8 +370,7 @@ def merge_knn_global(k, df1, df2, suffixes, model) -> DataFrame:
     k_efetivo = min(k, len(df1))
     start_index_time = time.time()
     with PeakMemoryMonitor() as memory_monitor:
-        index = faiss.IndexFlatIP(embeddings_base.shape[1])
-        index.add(embeddings_base)
+        index, _gpu_resources = build_faiss_index(embeddings_base)
     index_time = time.time() - start_index_time
     mem_used_create_index = memory_monitor.peak_delta_mb
 
@@ -628,8 +656,7 @@ def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
 
         start_index_time = time.time()
         with PeakMemoryMonitor() as memory_monitor:
-            index = faiss.IndexFlatIP(embeddings_base_mun.shape[1])
-            index.add(embeddings_base_mun)
+            index, _gpu_resources = build_faiss_index(embeddings_base_mun)
         mem_used_create_index = memory_monitor.peak_delta_mb
         index_time = time.time() - start_index_time
 

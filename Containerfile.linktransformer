@@ -22,8 +22,14 @@ WORKDIR /workspace
 
 COPY requirements_podman_linktransformer.txt /tmp/requirements_podman_linktransformer.txt
 
+ARG FAISS_GPU=0
+
 RUN python -m pip install --upgrade pip setuptools wheel \
-    && python -m pip install --no-cache-dir -r /tmp/requirements_podman_linktransformer.txt
+    && python -m pip install --no-cache-dir -r /tmp/requirements_podman_linktransformer.txt \
+    && if [ "${FAISS_GPU}" = "1" ]; then \
+        python -m pip uninstall -y faiss-cpu \
+        && python -m pip install --no-cache-dir faiss-gpu-cu12==1.8.0.2; \
+    fi
 
 RUN python -m pip install --no-cache-dir nmslib==2.1.2
 
