@@ -38,6 +38,8 @@ from linktransformer.infer_main import (  # noqa: E402
     merge_knn_global,
     merge_knn2,
     merge_knn2_global,
+    merge_knn_cuhnsw,
+    merge_knn_cuhnsw_global,
 )
 from model_selection import (  # noqa: E402
     MODELOS_A_UTILIZAR,
@@ -195,13 +197,17 @@ def main() -> None:
                 if args.scope == "geral":
                     if args.indexer in {"both", "faiss"}:
                         merge_knn_global(k, df1, df2, suffixes, modelo)
-                    if args.indexer in {"both", "svs"}:
-                        merge_knn2_global(k, df1, df2, suffixes, modelo)
+                if args.indexer in {"both", "svs"}:
+                    merge_knn2_global(k, df1, df2, suffixes, modelo)
+                if args.indexer == "cuhnsw":
+                    merge_knn_cuhnsw_global(k, df1, df2, suffixes, modelo)
                 else:
                     if args.indexer in {"both", "faiss"}:
                         merge_knn(k, df1, df2, suffixes, modelo)
-                    if args.indexer in {"both", "svs"}:
-                        merge_knn2(k, df1, df2, suffixes, modelo)
+                if args.indexer in {"both", "svs"}:
+                    merge_knn2(k, df1, df2, suffixes, modelo)
+                if args.indexer == "cuhnsw":
+                    merge_knn_cuhnsw(k, df1, df2, suffixes, modelo)
     except Exception as exc:
         print(f">>> ERRO em main_linktransformer.py: {type(exc).__name__}: {exc}", flush=True)
         traceback.print_exc(file=sys.stdout)

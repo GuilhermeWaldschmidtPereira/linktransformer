@@ -1,0 +1,24 @@
+FROM nvidia/cuda:12.6.3-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONPATH=/workspace/src \
+    TORCH_CUDA_ARCH_LIST=8.6 \
+    PATH="/opt/venv/bin:${PATH}"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential ca-certificates cmake git libopenblas-dev \
+        python3.10 python3.10-dev python3.10-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3.10 -m venv /opt/venv \
+    && python -m pip install --upgrade pip setuptools wheel
+
+WORKDIR /workspace
+COPY requirements_podman_linktransformer.txt /tmp/requirements_podman_linktransformer.txt
+
+RUN python -m pip install --no-cache-dir -r /tmp/requirements_podman_linktransformer.txt \
+    && python -m pip uninstall -y svs \
+    && python -m pip install --no-cache-dir scalable-vs cuhnsw
+
+CMD ["python", "/workspace/run_linktransformer/main_linktransformer.py"]

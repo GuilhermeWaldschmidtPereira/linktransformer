@@ -240,7 +240,34 @@ podman run --rm \
     --model sentence-transformers/all-MiniLM-L6-v2
 ```
 
-### 4. ScaNN
+### 4. CUHNSW (HNSW com CUDA)
+
+Construa a imagem CUDA dedicada uma vez:
+
+```bash
+podman build -f Containerfile.cuhnsw -t localhost/projeto-mestrado-cuhnsw:latest .
+```
+
+Execute com o mesmo pipeline modular, escolhendo `--indexer cuhnsw`:
+
+```bash
+podman run --rm \
+  --device nvidia.com/gpu=1 \
+  -e LINKTRANSFORMER_DATA_DIR=/workspace/dados \
+  -e LINKTRANSFORMER_RESULTS_DIR=/workspace/resultados_cuhnsw \
+  -v "$PWD:/workspace:Z" \
+  -w /workspace \
+  localhost/projeto-mestrado-cuhnsw:latest \
+  python /workspace/run_linktransformer/main_linktransformer.py \
+    --scope geral \
+    --indexer cuhnsw \
+    --model sentence-transformers/all-MiniLM-L6-v2 \
+    --k 1
+```
+
+Para executar em segundo plano, envolva esse `podman run` com o mesmo padrão `nohup ... > arquivo.log 2>&1 < /dev/null &` usado nos demais indexadores. CUHNSW requer GPU CUDA; suporta consulta em lote e usa vetores normalizados com produto interno para correspondência por cosseno.
+
+### 5. ScaNN
 
 Modo padrão, sem ajuste fino:
 

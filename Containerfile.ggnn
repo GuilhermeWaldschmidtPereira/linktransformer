@@ -1,0 +1,39 @@
+FROM nvidia/cuda:12.6.3-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONPATH=/workspace/src \
+    TORCH_CUDA_ARCH_LIST=8.6
+
+ENV PATH="/opt/venv/bin:${PATH}"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        cmake \
+        git \
+        libgflags-dev \
+        libgoogle-glog-dev \
+        libopenblas-dev \
+        python3.10 \
+        python3.10-dev \
+        python3.10-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3.10 -m venv /opt/venv \
+    && python -m pip install --upgrade pip setuptools wheel \
+    && python -m pip install cmake==3.30.5 nanobind
+
+WORKDIR /workspace
+
+COPY requirements_podman_linktransformer.txt /tmp/requirements_podman_linktransformer.txt
+
+RUN python -m pip install --no-cache-dir -r /tmp/requirements_podman_linktransformer.txt \
+    && python -m pip uninstall -y svs \
+    && python -m pip install --no-cache-dir scalable-vs
+
+RUN git clone --depth 1 --branch release_0.9 https://github.com/cgtuebingen/ggnn.git /tmp/ggnn \
+    && python -m pip install --no-cache-dir /tmp/ggnn \
+    && rm -rf /tmp/ggnn
+
+CMD ["python", "/workspace/run_linktransformer/main_linktransformer.py"]

@@ -92,7 +92,7 @@ def parse_embedding_model_args(
     if include_indexer:
         parser.add_argument(
             "--indexer",
-            choices=("both", "faiss", "svs"),
+            choices=("both", "faiss", "svs", "cuhnsw"),
             default="both",
             help="Seleciona os indexadores a executar.",
         )
