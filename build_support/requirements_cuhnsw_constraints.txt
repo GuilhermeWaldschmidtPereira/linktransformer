@@ -1,0 +1,3 @@
+# The CUHNSW extension uses CUDA; keep Python's PyTorch CPU-only to avoid
+# pulling the much larger nvidia-* PyPI wheels into this image.
+torch==2.5.1+cpu

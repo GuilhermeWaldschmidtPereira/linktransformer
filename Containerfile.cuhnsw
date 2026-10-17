@@ -20,8 +20,12 @@ RUN python3.10 -m venv /opt/venv \
 WORKDIR /workspace
 COPY requirements_podman_linktransformer.txt /tmp/requirements_podman_linktransformer.txt
 COPY build_support/patch_cuhnsw_cpp17.py /tmp/patch_cuhnsw_cpp17.py
+COPY build_support/requirements_cuhnsw_constraints.txt /tmp/requirements_cuhnsw_constraints.txt
 
-RUN python -m pip install --no-cache-dir -r /tmp/requirements_podman_linktransformer.txt \
+RUN python -m pip install --no-cache-dir \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        --constraint /tmp/requirements_cuhnsw_constraints.txt \
+        -r /tmp/requirements_podman_linktransformer.txt \
     && python -m pip uninstall -y svs \
     && python -m pip install --no-cache-dir scalable-vs \
     && python -m pip install --no-cache-dir "setuptools==64.0.3" \
