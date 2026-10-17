@@ -624,7 +624,9 @@ def _search_cuhnsw(index, embeddings_base, embeddings_query, k):
     return neighbors, scores, result_k
 
 
-def _merge_knn_cuhnsw(k, df1, df2, suffixes, model, scope):
+def _merge_knn_gpu_backend(
+    k, df1, df2, suffixes, model, scope, method, build_index, search_index
+):
     safe_model = safe_model_name(model)
     use_partitioned = scope == "municipio" and has_partitioned_embeddings(safe_model)
     if scope == "geral" or not use_partitioned:
@@ -678,7 +680,7 @@ def _merge_knn_cuhnsw(k, df1, df2, suffixes, model, scope):
 
         start_index_time = time.time()
         with PeakMemoryMonitor() as memory_monitor:
-            index = _build_cuhnsw_index(group_base)
+            index = build_index(group_base)
         index_time = time.time() - start_index_time
         index_memory = memory_monitor.peak_delta_mb
         total_index_time += index_time
@@ -691,7 +693,7 @@ def _merge_knn_cuhnsw(k, df1, df2, suffixes, model, scope):
         for execution in range(NUM_EXECUCOES_BUSCA):
             start_search_time = time.time()
             with PeakMemoryMonitor() as memory_monitor:
-                neighbors, scores, result_k = _search_cuhnsw(
+                neighbors, scores, result_k = search_index(
                     index, group_base, group_query, k_requested
                 )
             search_time = time.time() - start_search_time
@@ -723,7 +725,7 @@ def _merge_knn_cuhnsw(k, df1, df2, suffixes, model, scope):
         matched_parts.append(matched)
         matches = count_setor_matches(matched)
         result_rows.append({
-            "metodo": "cuhnsw",
+            "metodo": method,
             "modelo_embedding": model,
             "id_municipio": municipio_id,
             "index_time": index_time,
@@ -745,27 +747,27 @@ def _merge_knn_cuhnsw(k, df1, df2, suffixes, model, scope):
     avg_search_memory = float(np.mean(avg_search_memories)) if avg_search_memories else 0.0
     if scope == "geral":
         save_global_outputs(
-            "cuhnsw", model, safe_model, df1, df2, len(embeddings_base), k,
+            method, model, safe_model, df1, df2, len(embeddings_base), k,
             total_index_time, total_search_time, total_index_memory,
             avg_search_memory, detailed_rows, df_matched,
-            "cuhnsw", "cuhnsw", "matched_cuhnsw_global.csv",
+            method, method, f"matched_{method}_global.csv",
         )
     else:
-        append_resultados_por_municipio(pd.DataFrame(result_rows), "cuhnsw")
+        append_resultados_por_municipio(pd.DataFrame(result_rows), method)
         detailed = pd.DataFrame({
             **detailed_rows,
-            "modelo_index": ["cuhnsw"] * len(detailed_rows["execucao"]),
+            "modelo_index": [method] * len(detailed_rows["execucao"]),
             "modelo_embedding": [model] * len(detailed_rows["execucao"]),
         })
         append_csv(PATH_RESULTADOS_GERAL, detailed)
-        result_dir = os.path.join(PATH_RESULTADOS, "cuhnsw", safe_model)
+        result_dir = os.path.join(PATH_RESULTADOS, method, safe_model)
         os.makedirs(result_dir, exist_ok=True)
         detailed.to_csv(
             os.path.join(result_dir, "csv_final_tempos_buscas.csv"), index=False
         )
         results_file = os.path.join(PATH_RESULTADOS, "resultados.csv")
         result = pd.DataFrame({
-            "metodo": ["cuhnsw"],
+            "metodo": [method],
             "modelo_embedding": [model],
             "index_time": [total_index_time],
             "search_time": [total_search_time],
@@ -786,12 +788,116 @@ def _merge_knn_cuhnsw(k, df1, df2, suffixes, model, scope):
     return df_matched
 
 
+def _search_cuvs_backend(index, embeddings_base, embeddings_query, k):
+    return _search_cuvs(index, embeddings_query, k)
+
+
+def _merge_knn_cuhnsw(k, df1, df2, suffixes, model, scope):
+    return _merge_knn_gpu_backend(
+        k, df1, df2, suffixes, model, scope,
+        "cuhnsw", _build_cuhnsw_index, _search_cuhnsw,
+    )
+
+
 def merge_knn_cuhnsw_global(k, df1, df2, suffixes, model) -> DataFrame:
     return _merge_knn_cuhnsw(k, df1, df2, suffixes, model, "geral")
 
 
 def merge_knn_cuhnsw(k, df1, df2, suffixes, model) -> DataFrame:
     return _merge_knn_cuhnsw(k, df1, df2, suffixes, model, "municipio")
+
+
+def _merge_knn_cuvs(k, df1, df2, suffixes, model, scope):
+    return _merge_knn_gpu_backend(
+        k, df1, df2, suffixes, model, scope,
+        "cuvs", _build_cuvs_index, _search_cuvs_backend,
+    )
+
+
+def merge_knn_cuvs_global(k, df1, df2, suffixes, model) -> DataFrame:
+    return _merge_knn_cuvs(k, df1, df2, suffixes, model, "geral")
+
+
+def merge_knn_cuvs(k, df1, df2, suffixes, model) -> DataFrame:
+    return _merge_knn_cuvs(k, df1, df2, suffixes, model, "municipio")
+
+
+def _build_cuvs_index(embeddings: np.ndarray):
+    embeddings = np.ascontiguousarray(embeddings, dtype=np.float32)
+    if embeddings.ndim != 2 or len(embeddings) < 1:
+        raise ValueError("O CAGRA precisa de embeddings em formato 2D")
+    if len(embeddings) == 1:
+        return None, None, embeddings
+
+    try:
+        import cupy as cp
+        from cuvs.neighbors import cagra
+    except ImportError as exc:
+        raise ImportError(
+            "O backend cuVS requer os pacotes cuvs-cu12 e cupy-cuda12x. "
+            "Instale requirements-cuvs.txt e execute com uma GPU NVIDIA compatível."
+        ) from exc
+
+    num_rows = len(embeddings)
+    graph_degree = min(
+        num_rows - 1,
+        int(os.environ.get("CUVS_GRAPH_DEGREE", "64")),
+    )
+    intermediate_graph_degree = min(
+        num_rows - 1,
+        max(graph_degree, int(os.environ.get("CUVS_INTERMEDIATE_GRAPH_DEGREE", "128"))),
+    )
+    build_algo = os.environ.get("CUVS_BUILD_ALGO", "ivf_pq").strip().lower()
+    if build_algo not in {"ivf_pq", "nn_descent"}:
+        raise ValueError("CUVS_BUILD_ALGO deve ser 'ivf_pq' ou 'nn_descent'")
+    if graph_degree < 1:
+        raise ValueError("CUVS_GRAPH_DEGREE deve ser maior ou igual a 1")
+
+    device_embeddings = cp.asarray(embeddings, dtype=cp.float32)
+    params = cagra.IndexParams(
+        metric="cosine",
+        graph_degree=graph_degree,
+        intermediate_graph_degree=intermediate_graph_degree,
+        build_algo=build_algo,
+    )
+    index = cagra.build(params, device_embeddings)
+    return cagra, index, device_embeddings
+
+
+def _search_cuvs(index_bundle, embeddings_query: np.ndarray, k: int):
+    cagra, index, device_embeddings = index_bundle
+    query_host = np.ascontiguousarray(embeddings_query, dtype=np.float32)
+    if index is None:
+        neighbors = np.zeros((len(query_host), 1), dtype=np.int64)
+        scores = query_host @ device_embeddings.T
+        return neighbors, scores, 1
+
+    try:
+        import cupy as cp
+    except ImportError as exc:
+        raise ImportError(
+            "O backend cuVS requer cupy-cuda12x. Instale requirements-cuvs.txt."
+        ) from exc
+
+    query = cp.asarray(
+        query_host,
+        dtype=cp.float32,
+    )
+    itopk_size = max(k, int(os.environ.get("CUVS_ITOPK_SIZE", "64")))
+    distances, neighbors = cagra.search(
+        cagra.SearchParams(itopk_size=itopk_size), index, query, k
+    )
+    distances = np.asarray(cp.asnumpy(distances), dtype=np.float32)
+    neighbors = np.asarray(cp.asnumpy(neighbors), dtype=np.int64)
+    if distances.shape != neighbors.shape or neighbors.ndim != 2:
+        raise ValueError("Formato inesperado retornado por cuVS CAGRA search")
+    if len(neighbors) != len(embeddings_query):
+        raise ValueError("cuVS retornou uma quantidade inesperada de consultas")
+    if np.any(neighbors < 0) or np.any(neighbors >= len(device_embeddings)):
+        raise ValueError("cuVS retornou índices de vizinhos fora da base")
+
+    scores = 1.0 - distances
+    return neighbors, scores, neighbors.shape[1]
 
 
 def merge_knn(k, df1,df2, suffixes, model) -> DataFrame:
