@@ -19,7 +19,6 @@ RUN python3.10 -m venv /opt/venv \
 
 WORKDIR /workspace
 COPY requirements_podman_linktransformer.txt /tmp/requirements_podman_linktransformer.txt
-COPY build_support/patch_cuhnsw_cpp17.py /tmp/patch_cuhnsw_cpp17.py
 COPY build_support/requirements_cuhnsw_constraints.txt /tmp/requirements_cuhnsw_constraints.txt
 
 RUN python -m pip install --no-cache-dir \
@@ -28,14 +27,19 @@ RUN python -m pip install --no-cache-dir \
         -r /tmp/requirements_podman_linktransformer.txt \
     && python -m pip uninstall -y svs \
     && python -m pip install --no-cache-dir scalable-vs \
-    && python -m pip install --no-cache-dir "setuptools==64.0.3" \
-    && mkdir -p /tmp/cuhnsw-download /tmp/cuhnsw-src \
+    && python -m pip install --no-cache-dir "setuptools==64.0.3"
+
+RUN mkdir -p /tmp/cuhnsw-download /tmp/cuhnsw-src \
     && python -m pip download --no-deps --no-binary=:all: --no-build-isolation \
         --dest /tmp/cuhnsw-download "cuhnsw==0.0.8" \
     && tar -xzf /tmp/cuhnsw-download/cuhnsw-0.0.8.tar.gz \
-        -C /tmp/cuhnsw-src --strip-components=1 \
-    && python /tmp/patch_cuhnsw_cpp17.py /tmp/cuhnsw-src \
-    && python -m pip install --no-cache-dir --no-build-isolation /tmp/cuhnsw-src \
-    && python -m pip install --no-cache-dir --upgrade setuptools
+        -C /tmp/cuhnsw-src --strip-components=1
+
+COPY build_support/patch_cuhnsw_cpp17.py /tmp/patch_cuhnsw_cpp17.py
+RUN python /tmp/patch_cuhnsw_cpp17.py /tmp/cuhnsw-src
+
+RUN python -m pip install --no-cache-dir --no-build-isolation /tmp/cuhnsw-src
+
+RUN python -m pip install --no-cache-dir --upgrade setuptools
 
 CMD ["python", "/workspace/run_linktransformer/main_linktransformer.py"]

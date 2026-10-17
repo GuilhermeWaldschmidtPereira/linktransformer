@@ -254,6 +254,10 @@ duplicadas observada com o CUDA 12.6.
 O PyTorch dessa imagem é instalado na variante CPU para evitar baixar os
 grandes pacotes `nvidia-*` do PyPI; o CUHNSW continua compilado com CUDA e usa
 a GPU para indexação e busca.
+As dependências, o download do CUHNSW, o patch C++17 e a compilação ficam em
+etapas cacheáveis separadas. Em novas tentativas, mantenha o cache padrão do
+Podman (não use `--no-cache`); etapas concluídas serão reaproveitadas quando
+suas entradas não mudarem.
 
 Execute com o mesmo pipeline modular, escolhendo `--indexer cuhnsw`:
 
