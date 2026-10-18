@@ -251,6 +251,8 @@ podman build -f Containerfile.cuhnsw -t localhost/projeto-mestrado-cuhnsw:latest
 Durante o build, o código-fonte do CUHNSW 0.0.8 é ajustado para usar C++17
 no compilador CUDA e no compilador C++, para corrigir a falha de declarações
 duplicadas observada com o CUDA 12.6.
+O sdist do CUHNSW 0.0.8 omite `config.proto`; o build inclui o schema e gera
+`config_pb2.py`, necessário para importar o pacote.
 O PyTorch dessa imagem é instalado na variante CPU para evitar baixar os
 grandes pacotes `nvidia-*` do PyPI; o CUHNSW continua compilado com CUDA e usa
 a GPU para indexação e busca.

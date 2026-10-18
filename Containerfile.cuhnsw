@@ -40,6 +40,13 @@ RUN python /tmp/patch_cuhnsw_cpp17.py /tmp/cuhnsw-src
 
 RUN python -m pip install --no-cache-dir --no-build-isolation /tmp/cuhnsw-src
 
+# The PyPI sdist omits config.proto and its generated config_pb2.py module.
+COPY build_support/cuhnsw_config.proto /tmp/config.proto
+RUN python -m grpc_tools.protoc \
+        --proto_path=/tmp \
+        --python_out="$(python -c 'import site; print(site.getsitepackages()[0] + "/cuhnsw")')" \
+        config.proto
+
 RUN python -m pip install --no-cache-dir --upgrade setuptools
 
 CMD ["python", "/workspace/run_linktransformer/main_linktransformer.py"]
