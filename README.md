@@ -284,7 +284,8 @@ Para executar em segundo plano, envolva esse `podman run` com o mesmo padrão `n
 
 Jasper é integrado como um indexador opcional do pipeline e requer uma imagem CUDA
 separada. A imagem instala PyTorch CUDA, compila os bindings FFI para a GPU RTX
-A4000 (SM 8.6) e instala o Jasper a partir de um commit fixado do
+A4000 (SM 8.6) e instala versões fixadas do Jasper e do Gallatin, compatíveis
+com o CUDA 12.6 do servidor. O Jasper vem do
 [repositório upstream](https://github.com/saltsystemslab/Jasper).
 
 Construa a imagem:
