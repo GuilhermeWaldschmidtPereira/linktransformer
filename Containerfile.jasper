@@ -1,0 +1,48 @@
+FROM docker.io/nvidia/cuda:12.6.3-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONPATH=/workspace/src \
+    PATH="/opt/venv/bin:${PATH}"
+
+ARG JASPER_COMMIT=7ec9125049d6ca08170e47f4027a10c7e37d18bc
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential ca-certificates cmake git libopenblas-dev \
+        python3.10 python3.10-dev python3.10-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3.10 -m venv /opt/venv \
+    && python -m pip install --upgrade pip setuptools wheel
+
+WORKDIR /workspace
+COPY requirements_podman_linktransformer.txt /tmp/requirements_podman_linktransformer.txt
+COPY build_support/requirements_cuhnsw_constraints.txt /tmp/requirements_cuhnsw_constraints.txt
+COPY build_support/patch_jasper_cuda_arch.py /tmp/patch_jasper_cuda_arch.py
+
+RUN python -m pip install --no-cache-dir \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        --constraint /tmp/requirements_cuhnsw_constraints.txt \
+        -r /tmp/requirements_podman_linktransformer.txt \
+    && python -m pip uninstall -y svs torch \
+    && python -m pip install --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cu124 \
+        --extra-index-url https://pypi.org/simple \
+        "torch==2.5.1+cu124" \
+    && python -m pip install --no-cache-dir apache-tvm-ffi scalable-vs \
+    && python -m pip install --no-cache-dir "setuptools==64.0.3"
+
+RUN git clone https://github.com/saltsystemslab/Jasper.git /opt/Jasper \
+    && git -C /opt/Jasper checkout "${JASPER_COMMIT}" \
+    && python /tmp/patch_jasper_cuda_arch.py /opt/Jasper/CMakeLists.txt 86
+
+RUN cmake -S /opt/Jasper -B /opt/Jasper/build \
+        -DCMAKE_CUDA_ARCHITECTURES=86 \
+        -DJASPER_BUILD_FFI=ON \
+        -DJASPER_BUILD_CMD=OFF \
+        -DJASPER_BUILD_TESTS=OFF \
+    && cmake --build /opt/Jasper/build --target jasper_ffi --parallel 2 \
+    && cmake --install /opt/Jasper/build \
+    && python -m pip install --no-deps /opt/Jasper/python
+
+CMD ["python", "/workspace/run_linktransformer/main_linktransformer.py"]
