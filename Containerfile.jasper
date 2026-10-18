@@ -32,6 +32,10 @@ RUN python -m pip install --no-cache-dir \
     && python -m pip install --no-cache-dir apache-tvm-ffi scalable-vs \
     && python -m pip install --no-cache-dir "setuptools==64.0.3"
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libthrust-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN git clone https://github.com/saltsystemslab/Jasper.git /opt/Jasper \
     && git -C /opt/Jasper checkout "${JASPER_COMMIT}" \
     && python /tmp/patch_jasper_cuda_arch.py /opt/Jasper/CMakeLists.txt 86
