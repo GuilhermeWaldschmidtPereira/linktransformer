@@ -5,6 +5,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH="/opt/venv/bin:${PATH}"
 
 ARG JASPER_COMMIT=7ec9125049d6ca08170e47f4027a10c7e37d18bc
+# Jasper's floating Gallatin branch now requires CUDA 12.8; pin its CUDA 12.6-compatible revision.
+ARG GALLATIN_COMMIT=d8c50c612bd0325d65bbeddc780f0a054f763031
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -38,7 +40,8 @@ RUN apt-get update \
 
 RUN git clone https://github.com/saltsystemslab/Jasper.git /opt/Jasper \
     && git -C /opt/Jasper checkout "${JASPER_COMMIT}" \
-    && python /tmp/patch_jasper_cuda_arch.py /opt/Jasper/CMakeLists.txt 86
+    && python /tmp/patch_jasper_cuda_arch.py \
+        /opt/Jasper/CMakeLists.txt 86 "${GALLATIN_COMMIT}"
 
 RUN cmake -S /opt/Jasper -B /opt/Jasper/build \
         -DCMAKE_CUDA_ARCHITECTURES=86 \
