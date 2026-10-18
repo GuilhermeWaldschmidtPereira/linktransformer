@@ -280,7 +280,47 @@ podman run --rm \
 
 Para executar em segundo plano, envolva esse `podman run` com o mesmo padrão `nohup ... > arquivo.log 2>&1 < /dev/null &` usado nos demais indexadores. CUHNSW requer GPU CUDA; suporta consulta em lote e usa vetores normalizados com produto interno para correspondência por cosseno.
 
-### 5. ScaNN
+### 5. Jasper (GPU-native Vamana/RaBitQ)
+
+Jasper é integrado como um indexador opcional do pipeline e requer uma imagem CUDA
+separada. A imagem instala PyTorch CUDA, compila os bindings FFI para a GPU RTX
+A4000 (SM 8.6) e instala o Jasper a partir de um commit fixado do
+[repositório upstream](https://github.com/saltsystemslab/Jasper).
+
+Construa a imagem:
+
+`podman build -f Containerfile.jasper -t localhost/projeto-mestrado-jasper:latest .`
+
+O pipeline normaliza os embeddings, converte os vetores para float16 e usa
+produto interno para aproximar a similaridade cosseno. O grafo fica em memória
+pinned do host (`on_host=True`), enquanto a construção e a consulta usam CUDA.
+O orçamento padrão de trabalho é 4 GB; ajuste com
+`JASPER_WORKSPACE_BUDGET`. Para municípios com menos de 50 registros na base,
+o pipeline usa busca exata em vez de construir um grafo pequeno.
+
+Execute o escopo geral:
+
+```bash
+podman run --rm \
+  --device nvidia.com/gpu=1 \
+  -e LINKTRANSFORMER_DATA_DIR=/workspace/dados \
+  -e LINKTRANSFORMER_RESULTS_DIR=/workspace/resultados_jasper \
+  -e JASPER_WORKSPACE_BUDGET=4GB \
+  -v "$PWD:/workspace:Z" \
+  -w /workspace \
+  localhost/projeto-mestrado-jasper:latest \
+  python /workspace/run_linktransformer/main_linktransformer.py \
+    --scope geral \
+    --indexer jasper \
+    --model sentence-transformers/all-MiniLM-L6-v2 \
+    --k 1
+```
+
+Use `--scope municipio` para construir um índice separado por município.
+Também é possível ajustar `JASPER_N_NEIGHBORS` (8, 16, 32 ou 64),
+`JASPER_BEAM_WIDTH` e `JASPER_QUERY_BATCH_SIZE`.
+
+### 6. ScaNN
 
 Modo padrão, sem ajuste fino:
 

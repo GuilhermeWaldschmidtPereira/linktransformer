@@ -1456,6 +1456,241 @@ def merge_knn_cuhnsw(k, df1, df2, suffixes, model) -> DataFrame:
     return matched
 
 
+def _build_jasper_index(embeddings: np.ndarray):
+    """Build Jasper's host-resident GPU graph from normalized cosine vectors."""
+    import jasper
+    import torch
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("Jasper requer uma instalação CUDA do PyTorch e uma GPU disponível.")
+
+    n_neighbors = int(os.environ.get("JASPER_N_NEIGHBORS", "32"))
+    if n_neighbors not in {8, 16, 32, 64}:
+        raise ValueError("JASPER_N_NEIGHBORS deve ser 8, 16, 32 ou 64.")
+
+    vectors_np = np.ascontiguousarray(embeddings, dtype=np.float16)
+    vectors = torch.from_numpy(vectors_np).to(device="cuda", dtype=torch.float16)
+    del vectors_np
+    try:
+        index = jasper.Graph.build(
+            vectors,
+            n_neighbors=n_neighbors,
+            distance="ip",
+            alpha=float(os.environ.get("JASPER_ALPHA", "1.2")),
+            workspace_budget=os.environ.get("JASPER_WORKSPACE_BUDGET", "4GB"),
+            on_host=True,
+        )
+        torch.cuda.synchronize()
+        return index
+    finally:
+        del vectors
+        torch.cuda.empty_cache()
+
+
+def _search_jasper(index, queries: np.ndarray, k: int):
+    """Search Jasper in bounded batches and return cosine scores and ids."""
+    import torch
+
+    batch_size = int(os.environ.get("JASPER_QUERY_BATCH_SIZE", "8192"))
+    beam_width = max(int(os.environ.get("JASPER_BEAM_WIDTH", "64")), k)
+    if batch_size < 1:
+        raise ValueError("JASPER_QUERY_BATCH_SIZE deve ser maior que zero.")
+
+    all_indices = []
+    all_scores = []
+    for start in range(0, len(queries), batch_size):
+        query_np = np.ascontiguousarray(queries[start:start + batch_size], dtype=np.float16)
+        query_tensor = torch.from_numpy(query_np).to(device="cuda", dtype=torch.float16)
+        indices_tensor, distances_tensor = index.search(
+            query_tensor,
+            k=k,
+            beam_width=beam_width,
+        )
+        all_indices.append(indices_tensor.cpu().numpy().astype(np.int64, copy=False))
+        # Jasper represents inner-product distance as negative dot product.
+        all_scores.append(-distances_tensor.cpu().numpy().astype(np.float32, copy=False))
+        del query_tensor, indices_tensor, distances_tensor
+
+    if not all_indices:
+        return np.empty((0, k), dtype=np.int64), np.empty((0, k), dtype=np.float32)
+    return np.concatenate(all_indices), np.concatenate(all_scores)
+
+
+def _search_jasper_exact_small(base: np.ndarray, queries: np.ndarray, k: int):
+    """Exact cosine fallback for tiny partitions that Jasper cannot construct."""
+    batch_size = int(os.environ.get("JASPER_QUERY_BATCH_SIZE", "8192"))
+    if batch_size < 1:
+        raise ValueError("JASPER_QUERY_BATCH_SIZE deve ser maior que zero.")
+    all_indices = []
+    all_scores = []
+    for start in range(0, len(queries), batch_size):
+        scores = queries[start:start + batch_size] @ base.T
+        indices = np.argsort(-scores, axis=1)[:, :k]
+        all_indices.append(indices.astype(np.int64, copy=False))
+        all_scores.append(np.take_along_axis(scores, indices, axis=1).astype(np.float32, copy=False))
+    if not all_indices:
+        return np.empty((0, k), dtype=np.int64), np.empty((0, k), dtype=np.float32)
+    return np.concatenate(all_indices), np.concatenate(all_scores)
+
+
+def merge_knn_jasper_global(k, df1, df2, suffixes, model) -> DataFrame:
+    safe_model = safe_model_name(model)
+    base, query = load_global_embeddings(safe_model, normalize=True)
+    if len(base) == 0:
+        raise ValueError("A base do Jasper está vazia.")
+    df1, df2 = df1.copy().reset_index(drop=True), df2.copy().reset_index(drop=True)
+    k_eff = min(k, len(base))
+
+    index = None
+    with PeakMemoryMonitor() as monitor:
+        started = time.time()
+        if len(base) >= 50:
+            index = _build_jasper_index(base)
+        index_time = time.time() - started if index is not None else 0.0
+    index_memory = monitor.peak_delta_mb if index is not None else 0.0
+
+    timings, memories = [], []
+    indices = scores = None
+    try:
+        for _ in range(NUM_EXECUCOES_BUSCA):
+            with PeakMemoryMonitor() as search_monitor:
+                started = time.time()
+                if index is None:
+                    indices, scores = _search_jasper_exact_small(base, query, k_eff)
+                else:
+                    indices, scores = _search_jasper(index, query, k_eff)
+                timings.append(time.time() - started)
+            memories.append(search_monitor.peak_delta_mb)
+    finally:
+        if index is not None:
+            index.free()
+
+    matched = build_matches_global(df1, df2, indices, k_eff, suffixes, scores)
+    details = {
+        "execucao": list(range(1, NUM_EXECUCOES_BUSCA + 1)),
+        "tempo_busca": timings,
+        "memoria_usada_busca_MB": memories,
+    }
+    save_global_outputs(
+        "jasper", model, safe_model, df1, df2, len(base), k, index_time,
+        float(np.mean(timings)), index_memory, float(np.mean(memories)), details,
+        matched, "jasper", "jasper", "matched_jasper_global.csv",
+    )
+    return matched
+
+
+def merge_knn_jasper(k, df1, df2, suffixes, model) -> DataFrame:
+    safe_model = safe_model_name(model)
+    df1, df2 = df1.copy().reset_index(drop=True), df2.copy().reset_index(drop=True)
+    municipio_col = get_municipio_column(df1, df2)
+    has_flat = all(
+        os.path.exists(get_flat_embeddings_path(side, safe_model))
+        for side in ("base", "query")
+    )
+    use_partitions = not has_flat and has_partitioned_embeddings(safe_model)
+    if use_partitions:
+        base = query = None
+    else:
+        base, query = load_flat_embeddings(safe_model)
+        base, query = normalize_embeddings(base), normalize_embeddings(query)
+
+    matched_parts, rows = [], []
+    details = {"execucao": [], "tempo_busca": [], "memoria_usada_busca_MB": []}
+    for municipality in df2[municipio_col].dropna().drop_duplicates().tolist():
+        bi = df1.index[df1[municipio_col] == municipality].to_numpy()
+        qi = df2.index[df2[municipio_col] == municipality].to_numpy()
+        if not len(bi) or not len(qi):
+            continue
+
+        if use_partitions:
+            base_mun = load_partitioned_embeddings("base", safe_model, municipality, len(bi))
+            query_mun = load_partitioned_embeddings("query", safe_model, municipality, len(qi))
+            base_mun = normalize_embeddings(base_mun)
+            query_mun = normalize_embeddings(query_mun)
+        else:
+            base_mun, query_mun = base[bi], query[qi]
+
+        k_eff = min(k, len(bi))
+        index = None
+        with PeakMemoryMonitor() as monitor:
+            started = time.time()
+            if len(base_mun) >= 50:
+                index = _build_jasper_index(base_mun)
+            index_time = time.time() - started if index is not None else 0.0
+        index_memory = monitor.peak_delta_mb if index is not None else 0.0
+
+        times, memories = [], []
+        indices = scores = None
+        try:
+            for execution in range(NUM_EXECUCOES_BUSCA):
+                with PeakMemoryMonitor() as search_monitor:
+                    started = time.time()
+                    if index is None:
+                        indices, scores = _search_jasper_exact_small(base_mun, query_mun, k_eff)
+                    else:
+                        indices, scores = _search_jasper(index, query_mun, k_eff)
+                    elapsed = time.time() - started
+                times.append(elapsed)
+                memories.append(search_monitor.peak_delta_mb)
+                details["execucao"].append(execution + 1)
+                details["tempo_busca"].append(elapsed)
+                details["memoria_usada_busca_MB"].append(search_monitor.peak_delta_mb)
+        finally:
+            if index is not None:
+                index.free()
+
+        part = build_matches_por_municipio(
+            df1.iloc[bi].reset_index(drop=True),
+            df2.iloc[qi].reset_index(drop=True),
+            indices, k_eff, suffixes, scores,
+        )
+        matched_parts.append(part)
+        rows.append({
+            "metodo": "jasper", "modelo_embedding": model, "id_municipio": municipality,
+            "index_time": index_time, "search_time": float(np.mean(times)),
+            "total_time": index_time + float(np.mean(times)), "num_rows_df1": len(bi),
+            "num_rows_df2": len(qi), "quantidade_enderecos_por_municipio": len(bi),
+            "quantidade_enderecos_buscados_municipio": len(qi),
+            "quantidade_acertos_municipio": count_setor_matches(part), "k": k,
+            "k_efetivo": k_eff, "mem_used_indexation_MB": index_memory,
+            "avg_mem_used_search_MB": float(np.mean(memories)),
+            "matches": count_setor_matches(part),
+        })
+
+    matched = pd.concat(matched_parts, ignore_index=True) if matched_parts else pd.DataFrame()
+    per_municipality = pd.DataFrame(rows)
+    append_resultados_por_municipio(per_municipality, "jasper")
+    df_times = pd.DataFrame(details)
+    df_times["modelo_index"] = "jasper"
+    df_times["modelo_embedding"] = model
+    pd.concat([pd.read_csv(PATH_RESULTADOS_GERAL), df_times], ignore_index=True).to_csv(
+        PATH_RESULTADOS_GERAL, index=False
+    )
+
+    out_dir = os.path.join(PATH_RESULTADOS, "jasper", safe_model)
+    os.makedirs(out_dir, exist_ok=True)
+    df_times.to_csv(os.path.join(out_dir, "csv_final_tempos_buscas.csv"), index=False)
+    matched.to_csv(os.path.join(PATH_RESULTADOS, "matched_jasper.csv"), index=False)
+    results = pd.DataFrame([{
+        "metodo": "jasper", "modelo_embedding": model,
+        "index_time": per_municipality["index_time"].sum() if not per_municipality.empty else 0,
+        "search_time": per_municipality["search_time"].sum() if not per_municipality.empty else 0,
+        "total_time": per_municipality["total_time"].sum() if not per_municipality.empty else 0,
+        "num_rows_df1": len(df1), "num_rows_df2": len(df2), "k": k,
+        "mem_used_indexation_MB": per_municipality["mem_used_indexation_MB"].sum()
+        if not per_municipality.empty else 0,
+        "avg_mem_used_search_MB": per_municipality["avg_mem_used_search_MB"].mean()
+        if not per_municipality.empty else 0,
+        "matches": count_setor_matches(matched),
+    }])
+    results_file = os.path.join(PATH_RESULTADOS, "resultados.csv")
+    results.to_csv(
+        results_file, mode="a" if os.path.exists(results_file) else "w",
+        header=not os.path.exists(results_file), index=False,
+    )
+    return matched
+
+
 def merge_knn_scann(k, df1, df2, suffixes) -> DataFrame:
     """
     Versão ScaNN no mesmo padrão da merge_knn (FAISS):
