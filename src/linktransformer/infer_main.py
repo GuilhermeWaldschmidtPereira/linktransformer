@@ -1371,8 +1371,16 @@ def _search_cuhnsw(index, queries: np.ndarray, k: int):
     return indices, scores
 
 
+def _cagra_numpy_dtype():
+    """Return the configured NumPy dtype shared by CAGRA build and search."""
+    vector_dtype = os.environ.get("CAGRA_VECTOR_DTYPE", "float16").strip().lower()
+    if vector_dtype not in {"float16", "float32"}:
+        raise ValueError("CAGRA_VECTOR_DTYPE deve ser 'float16' ou 'float32'.")
+    return np.float16 if vector_dtype == "float16" else np.float32
+
+
 def _build_cagra_index(embeddings: np.ndarray):
-    """Build a CAGRA GPU graph from normalized embeddings, keeping vectors in fp16."""
+    """Build a CAGRA GPU graph using the configured vector dtype."""
     import cupy as cp
     from cuvs.neighbors import cagra
 
@@ -1381,10 +1389,7 @@ def _build_cagra_index(embeddings: np.ndarray):
     if len(embeddings) < 2:
         raise ValueError("CAGRA precisa de pelo menos 2 vetores para construir o índice.")
 
-    vector_dtype = os.environ.get("CAGRA_VECTOR_DTYPE", "float16").strip().lower()
-    if vector_dtype not in {"float16", "float32"}:
-        raise ValueError("CAGRA_VECTOR_DTYPE deve ser 'float16' ou 'float32'.")
-    numpy_dtype = np.float16 if vector_dtype == "float16" else np.float32
+    numpy_dtype = _cagra_numpy_dtype()
 
     graph_degree = int(os.environ.get("CAGRA_GRAPH_DEGREE", "32"))
     intermediate_degree = int(os.environ.get("CAGRA_INTERMEDIATE_GRAPH_DEGREE", "64"))
@@ -1438,10 +1443,12 @@ def _search_cagra(index, queries: np.ndarray, k: int):
         itopk_size=itopk_size,
         search_width=search_width,
     )
+    # cuVS requires search queries to have the same dtype as the indexed dataset.
+    numpy_dtype = _cagra_numpy_dtype()
     all_indices, all_scores = [], []
     for start in range(0, len(queries), batch_size):
         query_host = np.ascontiguousarray(
-            queries[start:start + batch_size], dtype=np.float32
+            queries[start:start + batch_size], dtype=numpy_dtype
         )
         query_device = cp.asarray(query_host)
         distances, neighbors = cagra.search(search_params, index, query_device, k)
