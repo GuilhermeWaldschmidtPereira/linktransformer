@@ -1394,8 +1394,8 @@ def _build_cagra_index(embeddings: np.ndarray):
 
     numpy_dtype = _cagra_numpy_dtype()
 
-    graph_degree = int(os.environ.get("CAGRA_GRAPH_DEGREE", "32"))
-    intermediate_degree = int(os.environ.get("CAGRA_INTERMEDIATE_GRAPH_DEGREE", "64"))
+    graph_degree = int(os.environ.get("CAGRA_GRAPH_DEGREE", "64"))
+    intermediate_degree = int(os.environ.get("CAGRA_INTERMEDIATE_GRAPH_DEGREE", "128"))
     if graph_degree < 1:
         raise ValueError("CAGRA_GRAPH_DEGREE deve ser maior que zero.")
     if intermediate_degree < graph_degree:
@@ -1434,8 +1434,8 @@ def _search_cagra(index, queries: np.ndarray, k: int):
     from cuvs.neighbors import cagra
 
     batch_size = int(os.environ.get("CAGRA_QUERY_BATCH_SIZE", "512"))
-    itopk_size = max(int(os.environ.get("CAGRA_ITOPK_SIZE", "64")), k)
-    search_width = int(os.environ.get("CAGRA_SEARCH_WIDTH", "1"))
+    itopk_size = max(int(os.environ.get("CAGRA_ITOPK_SIZE", "128")), k)
+    search_width = int(os.environ.get("CAGRA_SEARCH_WIDTH", "2"))
     if batch_size < 1:
         raise ValueError("CAGRA_QUERY_BATCH_SIZE deve ser maior que zero.")
     if search_width < 1:
@@ -1756,7 +1756,7 @@ def _build_jasper_index(embeddings: np.ndarray):
     if not torch.cuda.is_available():
         raise RuntimeError("Jasper requer uma instalação CUDA do PyTorch e uma GPU disponível.")
 
-    n_neighbors = int(os.environ.get("JASPER_N_NEIGHBORS", "32"))
+    n_neighbors = int(os.environ.get("JASPER_N_NEIGHBORS", "64"))
     if n_neighbors not in {8, 16, 32, 64}:
         raise ValueError("JASPER_N_NEIGHBORS deve ser 8, 16, 32 ou 64.")
 
@@ -1784,7 +1784,7 @@ def _search_jasper(index, queries: np.ndarray, k: int):
     import torch
 
     batch_size = int(os.environ.get("JASPER_QUERY_BATCH_SIZE", "8192"))
-    beam_width = max(int(os.environ.get("JASPER_BEAM_WIDTH", "64")), k)
+    beam_width = max(int(os.environ.get("JASPER_BEAM_WIDTH", "128")), k)
     if batch_size < 1:
         raise ValueError("JASPER_QUERY_BATCH_SIZE deve ser maior que zero.")
 
@@ -1995,7 +1995,7 @@ def _build_ggnn_index(embeddings: np.ndarray):
     if len(vectors) < 3:
         raise ValueError("GGNN precisa de pelo menos 3 vetores para construir o grafo.")
 
-    k_build = int(os.environ.get("GGNN_K_BUILD", "32"))
+    k_build = int(os.environ.get("GGNN_K_BUILD", "64"))
     if k_build < 2:
         raise ValueError("GGNN_K_BUILD deve ser maior ou igual a 2.")
     k_build = min(k_build, len(vectors) - 1)
@@ -2005,7 +2005,7 @@ def _build_ggnn_index(embeddings: np.ndarray):
     index.set_base(vectors)
     index.build(
         k_build=k_build,
-        tau_build=float(os.environ.get("GGNN_TAU_BUILD", "0.5")),
+        tau_build=float(os.environ.get("GGNN_TAU_BUILD", "0.7")),
         refinement_iterations=int(os.environ.get("GGNN_REFINEMENT_ITERATIONS", "2")),
         measure=ggnn.DistanceMeasure.Cosine,
     )
@@ -2013,15 +2013,21 @@ def _build_ggnn_index(embeddings: np.ndarray):
     return index
 
 
-def _search_ggnn(index, queries: np.ndarray, k: int):
-    """Query GGNN in bounded batches and return cosine similarities and ids."""
+def _search_ggnn(index, queries: np.ndarray, k: int, base_size: int):
+    """Query a wider GGNN candidate set, then return the requested top-k results."""
     import ggnn
 
     batch_size = int(os.environ.get("GGNN_QUERY_BATCH_SIZE", "4096"))
-    tau_query = float(os.environ.get("GGNN_TAU_QUERY", "0.64"))
-    max_iterations = int(os.environ.get("GGNN_MAX_ITERATIONS", "400"))
+    min_k_query = int(os.environ.get("GGNN_MIN_K_QUERY", "10"))
+    tau_query = float(os.environ.get("GGNN_TAU_QUERY", "1.0"))
+    max_iterations = int(os.environ.get("GGNN_MAX_ITERATIONS", "1000"))
     if batch_size < 1:
         raise ValueError("GGNN_QUERY_BATCH_SIZE deve ser maior que zero.")
+    if min_k_query < 1:
+        raise ValueError("GGNN_MIN_K_QUERY deve ser maior ou igual a 1.")
+    if base_size < 1:
+        raise ValueError("GGNN não pode consultar uma base vazia.")
+    search_k = min(max(k, min_k_query), base_size)
 
     all_indices, all_scores = [], []
     for start in range(0, len(queries), batch_size):
@@ -2030,16 +2036,16 @@ def _search_ggnn(index, queries: np.ndarray, k: int):
         )
         indices, distances = index.query(
             query_batch,
-            k_query=k,
+            k_query=search_k,
             tau_query=tau_query,
             max_iterations=max_iterations,
             measure=ggnn.DistanceMeasure.Cosine,
         )
         indices = np.asarray(indices, dtype=np.int64)
         distances = np.asarray(distances, dtype=np.float32)
-        all_indices.append(indices)
+        all_indices.append(indices[:, :k])
         # GGNN reports cosine distance (1 - cosine similarity).
-        all_scores.append(1.0 - distances)
+        all_scores.append(1.0 - distances[:, :k])
 
     if not all_indices:
         return np.empty((0, k), dtype=np.int64), np.empty((0, k), dtype=np.float32)
@@ -2102,7 +2108,7 @@ def merge_knn_ggnn_global(k, df1, df2, suffixes, model) -> DataFrame:
                 if index is None:
                     indices, scores = _search_ggnn_exact_small(base, query, k_eff)
                 else:
-                    indices, scores = _search_ggnn(index, query, k_eff)
+                    indices, scores = _search_ggnn(index, query, k_eff, len(base))
                 timings.append(time.time() - started)
             memories.append(search_monitor.peak_delta_mb)
     finally:
@@ -2173,7 +2179,7 @@ def merge_knn_ggnn(k, df1, df2, suffixes, model) -> DataFrame:
                     if index is None:
                         indices, scores = _search_ggnn_exact_small(base_mun, query_mun, k_eff)
                     else:
-                        indices, scores = _search_ggnn(index, query_mun, k_eff)
+                        indices, scores = _search_ggnn(index, query_mun, k_eff, len(base_mun))
                     elapsed = time.time() - started
                 times.append(elapsed)
                 memories.append(search_monitor.peak_delta_mb)

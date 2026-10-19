@@ -4,7 +4,7 @@ set -u
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
-REPETICOES=300
+REPETICOES="${REPETICOES:-1}"
 USER_ID="$(id -u)"
 GROUP_ID="$(id -g)"
 STATUS_LOG="$ROOT/logs_nohup/all_indexers_status.log"
