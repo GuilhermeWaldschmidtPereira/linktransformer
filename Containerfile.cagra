@@ -1,0 +1,37 @@
+FROM docker.io/nvidia/cuda:12.6.3-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONPATH=/workspace/src \
+    PATH="/opt/venv/bin:${PATH}"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential ca-certificates cmake git libopenblas-dev \
+        python3.10 python3.10-dev python3.10-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3.10 -m venv /opt/venv \
+    && python -m pip install --upgrade pip setuptools wheel
+
+WORKDIR /workspace
+COPY requirements_podman_linktransformer.txt /tmp/requirements_podman_linktransformer.txt
+COPY build_support/requirements_cuhnsw_constraints.txt /tmp/requirements_cuhnsw_constraints.txt
+COPY requirements_cagra.txt /tmp/requirements_cagra.txt
+
+RUN python -m pip install --no-cache-dir \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        --constraint /tmp/requirements_cuhnsw_constraints.txt \
+        -r /tmp/requirements_podman_linktransformer.txt \
+    && python -m pip uninstall -y svs torch \
+    && python -m pip install --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cu124 \
+        --extra-index-url https://pypi.org/simple \
+        "torch==2.5.1+cu124" \
+    && python -m pip install --no-cache-dir apache-tvm-ffi scalable-vs \
+    && python -m pip install --no-cache-dir "setuptools==64.0.3"
+
+RUN python -m pip install --no-cache-dir \
+        --extra-index-url https://pypi.nvidia.com \
+        -r /tmp/requirements_cagra.txt
+
+CMD ["python", "/workspace/run_linktransformer/main_linktransformer.py"]
