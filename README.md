@@ -321,7 +321,40 @@ Use `--scope municipio` para construir um índice separado por município.
 Também é possível ajustar `JASPER_N_NEIGHBORS` (8, 16, 32 ou 64),
 `JASPER_BEAM_WIDTH` e `JASPER_QUERY_BATCH_SIZE`.
 
-### 6. ScaNN
+### 6. GGNN (Graph-based GPU Nearest Neighbor Search)
+
+GGNN está disponível como indexador opcional nos escopos `geral` e
+`municipio`. A imagem compila os bindings oficiais para CUDA 12.6 e a GPU
+RTX A4000 (SM 8.6), fixando a revisão upstream usada no build.
+
+```bash
+podman build -f Containerfile.ggnn -t localhost/projeto-mestrado-ggnn:latest .
+```
+
+O pipeline normaliza os embeddings e usa distância cosseno. Bases com menos de
+50 vetores usam busca exata, sem criar um grafo pequeno. Para executar:
+
+```bash
+podman run --rm \
+  --device nvidia.com/gpu=1 \
+  -e LINKTRANSFORMER_DATA_DIR=/workspace/dados \
+  -e LINKTRANSFORMER_RESULTS_DIR=/workspace/resultados_ggnn \
+  -v "$PWD:/workspace:Z" \
+  -w /workspace \
+  localhost/projeto-mestrado-ggnn:latest \
+  python /workspace/run_linktransformer/main_linktransformer.py \
+    --scope geral \
+    --indexer ggnn \
+    --model sentence-transformers/all-MiniLM-L6-v2 \
+    --k 1
+```
+
+Use `--scope municipio` para gerar um grafo por município. Os parâmetros
+`GGNN_K_BUILD`, `GGNN_TAU_BUILD`, `GGNN_REFINEMENT_ITERATIONS`,
+`GGNN_TAU_QUERY`, `GGNN_MAX_ITERATIONS` e `GGNN_QUERY_BATCH_SIZE` podem ser
+ajustados por variáveis de ambiente.
+
+### 7. ScaNN
 
 Modo padrão, sem ajuste fino:
 
