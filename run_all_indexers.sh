@@ -5,12 +5,12 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
 REPETICOES="${REPETICOES:-1}"
+RUN_ID="${RUN_ID:-$(date '+%Y%m%d_%H%M%S')}"
 USER_ID="$(id -u)"
 GROUP_ID="$(id -g)"
 STATUS_LOG="$ROOT/logs_nohup/all_indexers_status.log"
 
 mkdir -p "$ROOT/logs_nohup" "$ROOT/resultados_comparacao"
-: > "$STATUS_LOG"
 
 run_one() {
     local model="$1"
@@ -48,7 +48,7 @@ run_one() {
             ;;
     esac
 
-    log="$ROOT/logs_nohup/${indexer}_${short}_repeticoes-${REPETICOES}.log"
+    log="$ROOT/logs_nohup/${indexer}_${short}_${RUN_ID}_repeticoes-${REPETICOES}.log"
     mkdir -p "$ROOT/resultados_comparacao/$indexer/$short"
 
     printf '%s\tINICIO\t%s\t%s\t%s repeticoes\n' \
