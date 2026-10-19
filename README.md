@@ -354,7 +354,46 @@ Use `--scope municipio` para gerar um grafo por município. Os parâmetros
 `GGNN_TAU_QUERY`, `GGNN_MAX_ITERATIONS` e `GGNN_QUERY_BATCH_SIZE` podem ser
 ajustados por variáveis de ambiente.
 
-### 7. ScaNN
+### 7. cuVS CAGRA
+
+CAGRA, do NVIDIA cuVS, está disponível nos escopos `geral` e `municipio`.
+Ele indexa embeddings normalizados com produto interno. A imagem usa os wheels
+CUDA 12 para Python 3.10 e mantém os vetores do índice em `float16` para
+reduzir o uso de memória da GPU. A construção padrão usa IVF-PQ, grau final 32
+e grau intermediário 64. Bases com menos de 50 vetores usam busca exata.
+
+Construa a imagem:
+
+```bash
+podman build -f Containerfile.cagra -t localhost/projeto-mestrado-cagra:latest .
+```
+
+Execute o escopo geral:
+
+```bash
+podman run --rm \
+  --device nvidia.com/gpu=1 \
+  -e LINKTRANSFORMER_DATA_DIR=/workspace/dados \
+  -e LINKTRANSFORMER_RESULTS_DIR=/workspace/resultados_cagra \
+  -v "$PWD:/workspace:Z" \
+  -w /workspace \
+  localhost/projeto-mestrado-cagra:latest \
+  python /workspace/run_linktransformer/main_linktransformer.py \
+    --scope geral \
+    --indexer cagra \
+    --model sentence-transformers/all-MiniLM-L6-v2 \
+    --k 1
+```
+
+Use `--scope municipio` para construir um índice por município. Os parâmetros
+`CAGRA_VECTOR_DTYPE` (`float16` ou `float32`), `CAGRA_BUILD_ALGO`,
+`CAGRA_GRAPH_DEGREE`, `CAGRA_INTERMEDIATE_GRAPH_DEGREE`,
+`CAGRA_QUERY_BATCH_SIZE`, `CAGRA_ITOPK_SIZE` e `CAGRA_SEARCH_WIDTH` podem ser
+ajustados por variáveis de ambiente. `float32` e graus maiores aumentam o uso
+de memória; a memória de construção também depende dos buffers temporários do
+CAGRA.
+
+### 8. ScaNN
 
 Modo padrão, sem ajuste fino:
 
