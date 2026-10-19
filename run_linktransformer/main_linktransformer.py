@@ -42,6 +42,8 @@ from linktransformer.infer_main import (  # noqa: E402
     merge_knn_cuhnsw_global,
     merge_knn_jasper,
     merge_knn_jasper_global,
+    merge_knn_ggnn,
+    merge_knn_ggnn_global,
 )
 from model_selection import (  # noqa: E402
     MODELOS_A_UTILIZAR,
@@ -205,6 +207,8 @@ def main() -> None:
                         merge_knn_cuhnsw_global(k, df1, df2, suffixes, modelo)
                     if args.indexer == "jasper":
                         merge_knn_jasper_global(k, df1, df2, suffixes, modelo)
+                    if args.indexer == "ggnn":
+                        merge_knn_ggnn_global(k, df1, df2, suffixes, modelo)
                 else:
                     if args.indexer in {"both", "faiss"}:
                         merge_knn(k, df1, df2, suffixes, modelo)
@@ -214,6 +218,8 @@ def main() -> None:
                         merge_knn_cuhnsw(k, df1, df2, suffixes, modelo)
                     if args.indexer == "jasper":
                         merge_knn_jasper(k, df1, df2, suffixes, modelo)
+                    if args.indexer == "ggnn":
+                        merge_knn_ggnn(k, df1, df2, suffixes, modelo)
     except Exception as exc:
         print(f">>> ERRO em main_linktransformer.py: {type(exc).__name__}: {exc}", flush=True)
         traceback.print_exc(file=sys.stdout)

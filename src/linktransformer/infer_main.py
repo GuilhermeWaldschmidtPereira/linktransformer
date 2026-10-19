@@ -1691,6 +1691,259 @@ def merge_knn_jasper(k, df1, df2, suffixes, model) -> DataFrame:
     return matched
 
 
+def _build_ggnn_index(embeddings: np.ndarray):
+    """Build GGNN's CUDA graph over normalized float32 cosine vectors."""
+    import ggnn
+    import torch
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("GGNN requer uma instalação CUDA do PyTorch e uma GPU disponível.")
+
+    vectors = np.ascontiguousarray(embeddings, dtype=np.float32)
+    if len(vectors) < 3:
+        raise ValueError("GGNN precisa de pelo menos 3 vetores para construir o grafo.")
+
+    k_build = int(os.environ.get("GGNN_K_BUILD", "32"))
+    if k_build < 2:
+        raise ValueError("GGNN_K_BUILD deve ser maior ou igual a 2.")
+    k_build = min(k_build, len(vectors) - 1)
+
+    index = ggnn.GGNN()
+    index.set_return_results_on_gpu(False)
+    index.set_base(vectors)
+    index.build(
+        k_build=k_build,
+        tau_build=float(os.environ.get("GGNN_TAU_BUILD", "0.5")),
+        refinement_iterations=int(os.environ.get("GGNN_REFINEMENT_ITERATIONS", "2")),
+        measure=ggnn.DistanceMeasure.Cosine,
+    )
+    torch.cuda.synchronize()
+    return index
+
+
+def _search_ggnn(index, queries: np.ndarray, k: int):
+    """Query GGNN in bounded batches and return cosine similarities and ids."""
+    import ggnn
+
+    batch_size = int(os.environ.get("GGNN_QUERY_BATCH_SIZE", "4096"))
+    tau_query = float(os.environ.get("GGNN_TAU_QUERY", "0.64"))
+    max_iterations = int(os.environ.get("GGNN_MAX_ITERATIONS", "400"))
+    if batch_size < 1:
+        raise ValueError("GGNN_QUERY_BATCH_SIZE deve ser maior que zero.")
+
+    all_indices, all_scores = [], []
+    for start in range(0, len(queries), batch_size):
+        query_batch = np.ascontiguousarray(
+            queries[start:start + batch_size], dtype=np.float32
+        )
+        indices, distances = index.query(
+            query_batch,
+            k_query=k,
+            tau_query=tau_query,
+            max_iterations=max_iterations,
+            measure=ggnn.DistanceMeasure.Cosine,
+        )
+        indices = np.asarray(indices, dtype=np.int64)
+        distances = np.asarray(distances, dtype=np.float32)
+        all_indices.append(indices)
+        # GGNN reports cosine distance (1 - cosine similarity).
+        all_scores.append(1.0 - distances)
+
+    if not all_indices:
+        return np.empty((0, k), dtype=np.int64), np.empty((0, k), dtype=np.float32)
+    return np.concatenate(all_indices), np.concatenate(all_scores)
+
+
+def _search_ggnn_exact_small(base: np.ndarray, queries: np.ndarray, k: int):
+    """Use exact cosine search for small partitions where graph setup is wasteful."""
+    batch_size = int(os.environ.get("GGNN_QUERY_BATCH_SIZE", "4096"))
+    if batch_size < 1:
+        raise ValueError("GGNN_QUERY_BATCH_SIZE deve ser maior que zero.")
+    all_indices, all_scores = [], []
+    for start in range(0, len(queries), batch_size):
+        scores = queries[start:start + batch_size] @ base.T
+        indices = np.argsort(-scores, axis=1)[:, :k]
+        all_indices.append(indices.astype(np.int64, copy=False))
+        all_scores.append(np.take_along_axis(scores, indices, axis=1).astype(np.float32, copy=False))
+    if not all_indices:
+        return np.empty((0, k), dtype=np.int64), np.empty((0, k), dtype=np.float32)
+    return np.concatenate(all_indices), np.concatenate(all_scores)
+
+
+def _release_ggnn_index() -> None:
+    import gc
+    import torch
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def merge_knn_ggnn_global(k, df1, df2, suffixes, model) -> DataFrame:
+    safe_model = safe_model_name(model)
+    base, query = load_global_embeddings(safe_model, normalize=True)
+    df1, df2 = df1.copy().reset_index(drop=True), df2.copy().reset_index(drop=True)
+    if len(base) != len(df1) or len(query) != len(df2):
+        raise ValueError(
+            "Quantidade de embeddings GGNN incompatível com os dataframes: "
+            f"base={len(base)}/{len(df1)}, query={len(query)}/{len(df2)}"
+        )
+    if len(base) == 0:
+        raise ValueError("A base do GGNN está vazia.")
+    k_eff = min(k, len(base))
+    exact_threshold = int(os.environ.get("GGNN_EXACT_THRESHOLD", "50"))
+
+    index = None
+    with PeakMemoryMonitor() as monitor:
+        started = time.time()
+        if len(base) >= exact_threshold:
+            index = _build_ggnn_index(base)
+        index_time = time.time() - started if index is not None else 0.0
+    index_memory = monitor.peak_delta_mb if index is not None else 0.0
+
+    timings, memories = [], []
+    indices = scores = None
+    try:
+        for _ in range(NUM_EXECUCOES_BUSCA):
+            with PeakMemoryMonitor() as search_monitor:
+                started = time.time()
+                if index is None:
+                    indices, scores = _search_ggnn_exact_small(base, query, k_eff)
+                else:
+                    indices, scores = _search_ggnn(index, query, k_eff)
+                timings.append(time.time() - started)
+            memories.append(search_monitor.peak_delta_mb)
+    finally:
+        index = None
+        _release_ggnn_index()
+
+    matched = build_matches_global(df1, df2, indices, k_eff, suffixes, scores)
+    details = {
+        "execucao": list(range(1, NUM_EXECUCOES_BUSCA + 1)),
+        "tempo_busca": timings,
+        "memoria_usada_busca_MB": memories,
+    }
+    save_global_outputs(
+        "ggnn", model, safe_model, df1, df2, len(base), k, index_time,
+        float(np.mean(timings)), index_memory, float(np.mean(memories)), details,
+        matched, "ggnn", "ggnn", "matched_ggnn_global.csv",
+    )
+    return matched
+
+
+def merge_knn_ggnn(k, df1, df2, suffixes, model) -> DataFrame:
+    safe_model = safe_model_name(model)
+    df1, df2 = df1.copy().reset_index(drop=True), df2.copy().reset_index(drop=True)
+    municipio_col = get_municipio_column(df1, df2)
+    has_flat = all(
+        os.path.exists(get_flat_embeddings_path(side, safe_model))
+        for side in ("base", "query")
+    )
+    use_partitions = not has_flat and has_partitioned_embeddings(safe_model)
+    if use_partitions:
+        base = query = None
+    else:
+        base, query = load_flat_embeddings(safe_model)
+        base, query = normalize_embeddings(base), normalize_embeddings(query)
+
+    exact_threshold = int(os.environ.get("GGNN_EXACT_THRESHOLD", "50"))
+    matched_parts, rows = [], []
+    details = {"execucao": [], "tempo_busca": [], "memoria_usada_busca_MB": []}
+    for municipality in df2[municipio_col].dropna().drop_duplicates().tolist():
+        bi = df1.index[df1[municipio_col] == municipality].to_numpy()
+        qi = df2.index[df2[municipio_col] == municipality].to_numpy()
+        if not len(bi) or not len(qi):
+            continue
+
+        if use_partitions:
+            base_mun = load_partitioned_embeddings("base", safe_model, municipality, len(bi))
+            query_mun = load_partitioned_embeddings("query", safe_model, municipality, len(qi))
+            base_mun = normalize_embeddings(base_mun)
+            query_mun = normalize_embeddings(query_mun)
+        else:
+            base_mun, query_mun = base[bi], query[qi]
+
+        k_eff = min(k, len(base_mun))
+        index = None
+        with PeakMemoryMonitor() as monitor:
+            started = time.time()
+            if len(base_mun) >= exact_threshold:
+                index = _build_ggnn_index(base_mun)
+            index_time = time.time() - started if index is not None else 0.0
+        index_memory = monitor.peak_delta_mb if index is not None else 0.0
+
+        times, memories = [], []
+        indices = scores = None
+        try:
+            for execution in range(NUM_EXECUCOES_BUSCA):
+                with PeakMemoryMonitor() as search_monitor:
+                    started = time.time()
+                    if index is None:
+                        indices, scores = _search_ggnn_exact_small(base_mun, query_mun, k_eff)
+                    else:
+                        indices, scores = _search_ggnn(index, query_mun, k_eff)
+                    elapsed = time.time() - started
+                times.append(elapsed)
+                memories.append(search_monitor.peak_delta_mb)
+                details["execucao"].append(execution + 1)
+                details["tempo_busca"].append(elapsed)
+                details["memoria_usada_busca_MB"].append(search_monitor.peak_delta_mb)
+        finally:
+            index = None
+            _release_ggnn_index()
+
+        part = build_matches_por_municipio(
+            df1.iloc[bi].reset_index(drop=True),
+            df2.iloc[qi].reset_index(drop=True),
+            indices, k_eff, suffixes, scores,
+        )
+        matched_parts.append(part)
+        rows.append({
+            "metodo": "ggnn", "modelo_embedding": model, "id_municipio": municipality,
+            "index_time": index_time, "search_time": float(np.mean(times)),
+            "total_time": index_time + float(np.mean(times)), "num_rows_df1": len(bi),
+            "num_rows_df2": len(qi), "quantidade_enderecos_por_municipio": len(bi),
+            "quantidade_enderecos_buscados_municipio": len(qi),
+            "quantidade_acertos_municipio": count_setor_matches(part), "k": k,
+            "k_efetivo": k_eff, "mem_used_indexation_MB": index_memory,
+            "avg_mem_used_search_MB": float(np.mean(memories)),
+            "matches": count_setor_matches(part),
+        })
+
+    matched = pd.concat(matched_parts, ignore_index=True) if matched_parts else pd.DataFrame()
+    per_municipality = pd.DataFrame(rows)
+    append_resultados_por_municipio(per_municipality, "ggnn")
+    df_times = pd.DataFrame(details)
+    df_times["modelo_index"] = "ggnn"
+    df_times["modelo_embedding"] = model
+    pd.concat([pd.read_csv(PATH_RESULTADOS_GERAL), df_times], ignore_index=True).to_csv(
+        PATH_RESULTADOS_GERAL, index=False
+    )
+
+    out_dir = os.path.join(PATH_RESULTADOS, "ggnn", safe_model)
+    os.makedirs(out_dir, exist_ok=True)
+    df_times.to_csv(os.path.join(out_dir, "csv_final_tempos_buscas.csv"), index=False)
+    matched.to_csv(os.path.join(PATH_RESULTADOS, "matched_ggnn.csv"), index=False)
+    results = pd.DataFrame([{
+        "metodo": "ggnn", "modelo_embedding": model,
+        "index_time": per_municipality["index_time"].sum() if not per_municipality.empty else 0,
+        "search_time": per_municipality["search_time"].sum() if not per_municipality.empty else 0,
+        "total_time": per_municipality["total_time"].sum() if not per_municipality.empty else 0,
+        "num_rows_df1": len(df1), "num_rows_df2": len(df2), "k": k,
+        "mem_used_indexation_MB": per_municipality["mem_used_indexation_MB"].sum()
+        if not per_municipality.empty else 0,
+        "avg_mem_used_search_MB": per_municipality["avg_mem_used_search_MB"].mean()
+        if not per_municipality.empty else 0,
+        "matches": count_setor_matches(matched),
+    }])
+    results_file = os.path.join(PATH_RESULTADOS, "resultados.csv")
+    results.to_csv(
+        results_file, mode="a" if os.path.exists(results_file) else "w",
+        header=not os.path.exists(results_file), index=False,
+    )
+    return matched
+
+
 def merge_knn_scann(k, df1, df2, suffixes) -> DataFrame:
     """
     Versão ScaNN no mesmo padrão da merge_knn (FAISS):
