@@ -33,6 +33,12 @@ RUN python -m pip install --no-cache-dir \
 RUN rm /tmp/patch_jasper_cuda_arch.py \
     && python -m pip install --no-cache-dir "cmake==3.31.6"
 
+# Use the Ubuntu packages so FetchContent does not build the old gflags source,
+# whose CMake policy file is rejected by modern CMake versions.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgflags-dev libgoogle-glog-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Build the official Python bindings for the server's CUDA SM 8.6 GPU.
 # Limit compilation parallelism to keep the CUDA build's peak RAM predictable.
 ARG GGNN_COMMIT=2d03b36362bc824e37099092eabb95172ec18b64
