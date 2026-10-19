@@ -4,8 +4,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONPATH=/workspace/src \
     PATH="/opt/venv/bin:${PATH}"
 
-ARG GGNN_COMMIT=2d03b36362bc824e37099092eabb95172ec18b64
-
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential ca-certificates cmake git libopenblas-dev \
@@ -18,6 +16,7 @@ RUN python3.10 -m venv /opt/venv \
 WORKDIR /workspace
 COPY requirements_podman_linktransformer.txt /tmp/requirements_podman_linktransformer.txt
 COPY build_support/requirements_cuhnsw_constraints.txt /tmp/requirements_cuhnsw_constraints.txt
+COPY build_support/patch_jasper_cuda_arch.py /tmp/patch_jasper_cuda_arch.py
 
 RUN python -m pip install --no-cache-dir \
         --extra-index-url https://download.pytorch.org/whl/cpu \
@@ -31,10 +30,13 @@ RUN python -m pip install --no-cache-dir \
     && python -m pip install --no-cache-dir apache-tvm-ffi scalable-vs \
     && python -m pip install --no-cache-dir "setuptools==64.0.3"
 
-RUN python -m pip install --no-cache-dir "cmake==3.31.6"
+RUN rm /tmp/patch_jasper_cuda_arch.py \
+    && python -m pip install --no-cache-dir "cmake==3.31.6"
 
 # Build the official Python bindings for the server's CUDA SM 8.6 GPU.
 # Limit compilation parallelism to keep the CUDA build's peak RAM predictable.
+ARG GGNN_COMMIT=2d03b36362bc824e37099092eabb95172ec18b64
+
 RUN git clone https://github.com/cgtuebingen/ggnn.git /opt/GGNN \
     && git -C /opt/GGNN checkout "${GGNN_COMMIT}" \
     && sed -i 's/build_args = \["-j"\]/build_args = ["-j2"]/' /opt/GGNN/pyproject.toml \
