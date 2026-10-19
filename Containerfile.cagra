@@ -16,7 +16,7 @@ RUN python3.10 -m venv /opt/venv \
 WORKDIR /workspace
 COPY requirements_podman_linktransformer.txt /tmp/requirements_podman_linktransformer.txt
 COPY build_support/requirements_cuhnsw_constraints.txt /tmp/requirements_cuhnsw_constraints.txt
-COPY requirements_cagra.txt /tmp/requirements_cagra.txt
+COPY build_support/patch_jasper_cuda_arch.py /tmp/patch_jasper_cuda_arch.py
 
 RUN python -m pip install --no-cache-dir \
         --extra-index-url https://download.pytorch.org/whl/cpu \
@@ -30,6 +30,7 @@ RUN python -m pip install --no-cache-dir \
     && python -m pip install --no-cache-dir apache-tvm-ffi scalable-vs \
     && python -m pip install --no-cache-dir "setuptools==64.0.3"
 
+COPY requirements_cagra.txt /tmp/requirements_cagra.txt
 RUN python -m pip install --no-cache-dir \
         --extra-index-url https://pypi.nvidia.com \
         -r /tmp/requirements_cagra.txt
