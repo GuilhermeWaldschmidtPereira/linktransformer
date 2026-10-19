@@ -2,7 +2,6 @@ FROM docker.io/nvidia/cuda:12.6.3-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONPATH=/workspace/src \
-    TORCH_CUDA_ARCH_LIST=8.6 \
     PATH="/opt/venv/bin:${PATH}"
 
 ARG GGNN_COMMIT=2d03b36362bc824e37099092eabb95172ec18b64
@@ -10,7 +9,6 @@ ARG GGNN_COMMIT=2d03b36362bc824e37099092eabb95172ec18b64
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential ca-certificates cmake git libopenblas-dev \
-        libgflags-dev libgoogle-glog-dev \
         python3.10 python3.10-dev python3.10-venv \
     && rm -rf /var/lib/apt/lists/*
 
@@ -30,9 +28,10 @@ RUN python -m pip install --no-cache-dir \
         --index-url https://download.pytorch.org/whl/cu124 \
         --extra-index-url https://pypi.org/simple \
         "torch==2.5.1+cu124" \
-    && python -m pip install --no-cache-dir scalable-vs \
-    && python -m pip install --no-cache-dir "setuptools==64.0.3" \
-    && python -m pip install --no-cache-dir "cmake==3.31.6"
+    && python -m pip install --no-cache-dir apache-tvm-ffi scalable-vs \
+    && python -m pip install --no-cache-dir "setuptools==64.0.3"
+
+RUN python -m pip install --no-cache-dir "cmake==3.31.6"
 
 # Build the official Python bindings for the server's CUDA SM 8.6 GPU.
 # Limit compilation parallelism to keep the CUDA build's peak RAM predictable.
@@ -40,6 +39,6 @@ RUN git clone https://github.com/cgtuebingen/ggnn.git /opt/GGNN \
     && git -C /opt/GGNN checkout "${GGNN_COMMIT}" \
     && sed -i 's/build_args = \["-j"\]/build_args = ["-j2"]/' /opt/GGNN/pyproject.toml \
     && cd /opt/GGNN \
-    && python -m pip install --no-cache-dir .
+    && TORCH_CUDA_ARCH_LIST=8.6 python -m pip install --no-cache-dir .
 
 CMD ["python", "/workspace/run_linktransformer/main_linktransformer.py"]
