@@ -3,6 +3,7 @@
 import json
 import os
 import warnings
+from functools import lru_cache
 import faiss
 import numpy as np
 import pandas as pd
@@ -264,7 +265,9 @@ def normalize_embeddings(embeddings: np.ndarray) -> np.ndarray:
     return embeddings / norms
 
 
+@lru_cache(maxsize=None)
 def load_global_embeddings(safe_model: str, normalize: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+    """Load global embeddings once per process so repeated index builds reuse them."""
     embeddings_base, embeddings_query = load_flat_embeddings(safe_model)
     if normalize:
         embeddings_base = normalize_embeddings(embeddings_base)
@@ -1371,8 +1374,16 @@ def _search_cuhnsw(index, queries: np.ndarray, k: int):
     return indices, scores
 
 
+def _cagra_numpy_dtype():
+    """Return the configured NumPy dtype shared by CAGRA build and search."""
+    vector_dtype = os.environ.get("CAGRA_VECTOR_DTYPE", "float16").strip().lower()
+    if vector_dtype not in {"float16", "float32"}:
+        raise ValueError("CAGRA_VECTOR_DTYPE deve ser 'float16' ou 'float32'.")
+    return np.float16 if vector_dtype == "float16" else np.float32
+
+
 def _build_cagra_index(embeddings: np.ndarray):
-    """Build a CAGRA GPU graph from normalized embeddings, keeping vectors in fp16."""
+    """Build a CAGRA GPU graph using the configured vector dtype."""
     import cupy as cp
     from cuvs.neighbors import cagra
 
@@ -1381,13 +1392,10 @@ def _build_cagra_index(embeddings: np.ndarray):
     if len(embeddings) < 2:
         raise ValueError("CAGRA precisa de pelo menos 2 vetores para construir o índice.")
 
-    vector_dtype = os.environ.get("CAGRA_VECTOR_DTYPE", "float16").strip().lower()
-    if vector_dtype not in {"float16", "float32"}:
-        raise ValueError("CAGRA_VECTOR_DTYPE deve ser 'float16' ou 'float32'.")
-    numpy_dtype = np.float16 if vector_dtype == "float16" else np.float32
+    numpy_dtype = _cagra_numpy_dtype()
 
-    graph_degree = int(os.environ.get("CAGRA_GRAPH_DEGREE", "32"))
-    intermediate_degree = int(os.environ.get("CAGRA_INTERMEDIATE_GRAPH_DEGREE", "64"))
+    graph_degree = int(os.environ.get("CAGRA_GRAPH_DEGREE", "64"))
+    intermediate_degree = int(os.environ.get("CAGRA_INTERMEDIATE_GRAPH_DEGREE", "128"))
     if graph_degree < 1:
         raise ValueError("CAGRA_GRAPH_DEGREE deve ser maior que zero.")
     if intermediate_degree < graph_degree:
@@ -1426,8 +1434,8 @@ def _search_cagra(index, queries: np.ndarray, k: int):
     from cuvs.neighbors import cagra
 
     batch_size = int(os.environ.get("CAGRA_QUERY_BATCH_SIZE", "512"))
-    itopk_size = max(int(os.environ.get("CAGRA_ITOPK_SIZE", "64")), k)
-    search_width = int(os.environ.get("CAGRA_SEARCH_WIDTH", "1"))
+    itopk_size = max(int(os.environ.get("CAGRA_ITOPK_SIZE", "128")), k)
+    search_width = int(os.environ.get("CAGRA_SEARCH_WIDTH", "2"))
     if batch_size < 1:
         raise ValueError("CAGRA_QUERY_BATCH_SIZE deve ser maior que zero.")
     if search_width < 1:
@@ -1438,10 +1446,12 @@ def _search_cagra(index, queries: np.ndarray, k: int):
         itopk_size=itopk_size,
         search_width=search_width,
     )
+    # cuVS requires search queries to have the same dtype as the indexed dataset.
+    numpy_dtype = _cagra_numpy_dtype()
     all_indices, all_scores = [], []
     for start in range(0, len(queries), batch_size):
         query_host = np.ascontiguousarray(
-            queries[start:start + batch_size], dtype=np.float32
+            queries[start:start + batch_size], dtype=numpy_dtype
         )
         query_device = cp.asarray(query_host)
         distances, neighbors = cagra.search(search_params, index, query_device, k)
@@ -1738,7 +1748,11 @@ def merge_knn_cuhnsw(k, df1, df2, suffixes, model) -> DataFrame:
     return matched
 
 
-def _build_jasper_index(embeddings: np.ndarray):
+def _build_jasper_index(
+    embeddings: np.ndarray,
+    n_neighbors: Optional[int] = None,
+    alpha: Optional[float] = None,
+):
     """Build Jasper's host-resident GPU graph from normalized cosine vectors."""
     import jasper
     import torch
@@ -1746,9 +1760,14 @@ def _build_jasper_index(embeddings: np.ndarray):
     if not torch.cuda.is_available():
         raise RuntimeError("Jasper requer uma instalação CUDA do PyTorch e uma GPU disponível.")
 
-    n_neighbors = int(os.environ.get("JASPER_N_NEIGHBORS", "32"))
-    if n_neighbors not in {8, 16, 32, 64}:
-        raise ValueError("JASPER_N_NEIGHBORS deve ser 8, 16, 32 ou 64.")
+    if n_neighbors is None:
+        n_neighbors = int(os.environ.get("JASPER_N_NEIGHBORS", "64"))
+    if n_neighbors < 1:
+        raise ValueError("JASPER_N_NEIGHBORS deve ser maior que zero.")
+    if alpha is None:
+        alpha = float(os.environ.get("JASPER_ALPHA", "1.2"))
+    if alpha < 1.0:
+        raise ValueError("JASPER_ALPHA deve ser maior ou igual a 1.0.")
 
     vectors_np = np.ascontiguousarray(embeddings, dtype=np.float16)
     vectors = torch.from_numpy(vectors_np).to(device="cuda", dtype=torch.float16)
@@ -1758,7 +1777,7 @@ def _build_jasper_index(embeddings: np.ndarray):
             vectors,
             n_neighbors=n_neighbors,
             distance="ip",
-            alpha=float(os.environ.get("JASPER_ALPHA", "1.2")),
+            alpha=alpha,
             workspace_budget=os.environ.get("JASPER_WORKSPACE_BUDGET", "4GB"),
             on_host=True,
         )
@@ -1769,12 +1788,19 @@ def _build_jasper_index(embeddings: np.ndarray):
         torch.cuda.empty_cache()
 
 
-def _search_jasper(index, queries: np.ndarray, k: int):
+def _search_jasper(
+    index,
+    queries: np.ndarray,
+    k: int,
+    beam_width: Optional[int] = None,
+):
     """Search Jasper in bounded batches and return cosine scores and ids."""
     import torch
 
     batch_size = int(os.environ.get("JASPER_QUERY_BATCH_SIZE", "8192"))
-    beam_width = max(int(os.environ.get("JASPER_BEAM_WIDTH", "64")), k)
+    if beam_width is None:
+        beam_width = int(os.environ.get("JASPER_BEAM_WIDTH", "128"))
+    beam_width = max(beam_width, k)
     if batch_size < 1:
         raise ValueError("JASPER_QUERY_BATCH_SIZE deve ser maior que zero.")
 
@@ -1813,6 +1839,229 @@ def _search_jasper_exact_small(base: np.ndarray, queries: np.ndarray, k: int):
     if not all_indices:
         return np.empty((0, k), dtype=np.int64), np.empty((0, k), dtype=np.float32)
     return np.concatenate(all_indices), np.concatenate(all_scores)
+
+
+def _parse_jasper_tuning_grid(env_name: str, default: str, cast):
+    raw_values = os.environ.get(env_name, default)
+    try:
+        values = [cast(value.strip()) for value in raw_values.split(",") if value.strip()]
+    except ValueError as exc:
+        raise ValueError(f"Valor inválido em {env_name}={raw_values!r}.") from exc
+    if not values:
+        raise ValueError(f"{env_name} precisa conter ao menos um valor.")
+    return list(dict.fromkeys(values))
+
+
+def tune_knn_jasper_global(k, df1, df2, suffixes, model) -> DataFrame:
+    """Sweep Jasper graph/search parameters and rank them by sector-label hits."""
+    import gc
+    import torch
+
+    if model != "sentence-transformers/all-MiniLM-L6-v2":
+        raise ValueError("A varredura Jasper desta versão aceita somente o MiniLM.")
+    if "setor_censitario" not in df1.columns or "setor_censitario" not in df2.columns:
+        raise ValueError("O tuning exige setor_censitario em base e query para medir acertos.")
+
+    neighbors_grid = _parse_jasper_tuning_grid("JASPER_TUNE_N_NEIGHBORS", "32,64,96,128", int)
+    alpha_grid = _parse_jasper_tuning_grid("JASPER_TUNE_ALPHAS", "1.0,1.2,1.4", float)
+    beam_grid = _parse_jasper_tuning_grid("JASPER_TUNE_BEAM_WIDTHS", "64,128,256,512", int)
+    if any(value < 1 for value in neighbors_grid):
+        raise ValueError("Todos os valores em JASPER_TUNE_N_NEIGHBORS devem ser positivos.")
+    if any(not np.isfinite(value) or value < 1.0 for value in alpha_grid):
+        raise ValueError("Todos os valores em JASPER_TUNE_ALPHAS devem ser finitos e >= 1.0.")
+    if any(value < k for value in beam_grid):
+        raise ValueError("Todos os valores em JASPER_TUNE_BEAM_WIDTHS devem ser >= k.")
+
+    safe_model = safe_model_name(model)
+    base, query = load_global_embeddings(safe_model, normalize=True)
+    df1 = df1.copy().reset_index(drop=True)
+    df2 = df2.copy().reset_index(drop=True)
+    if len(base) != len(df1) or len(query) != len(df2):
+        raise ValueError(
+            "Embeddings e CSVs têm quantidades diferentes de linhas: "
+            f"base {len(base)}/{len(df1)}, query {len(query)}/{len(df2)}."
+        )
+    if len(base) == 0 or len(query) == 0:
+        raise ValueError("A base e a query precisam conter ao menos uma linha.")
+
+    k_eff = min(k, len(base))
+    output_dir = PATH_RESULTADOS
+    trials_path = os.path.join(output_dir, "jasper_tuning_trials.csv")
+    ranked_path = os.path.join(output_dir, "jasper_tuning_ranked.csv")
+    best_path = os.path.join(output_dir, "jasper_tuning_best_matches.csv")
+    best_config_path = os.path.join(output_dir, "jasper_tuning_best_config.csv")
+    total_graphs = len(neighbors_grid) * len(alpha_grid)
+    total_trials = total_graphs * len(beam_grid)
+    trial_number = 0
+    best_key = None
+    best_result = None
+    best_indices = None
+    best_scores = None
+
+    if os.path.exists(trials_path):
+        raise FileExistsError(
+            f"Já existe uma varredura Jasper em {trials_path}. "
+            "Defina um LINKTRANSFORMER_RESULTS_DIR novo para preservar os resultados anteriores."
+        )
+
+    print(
+        ">>> Jasper tuning MiniLM: "
+        f"{len(neighbors_grid)} valores de R x {len(alpha_grid)} alphas x "
+        f"{len(beam_grid)} beams = {total_trials} tentativas "
+        f"({total_graphs} construções de grafo).",
+        flush=True,
+    )
+
+    for n_neighbors in neighbors_grid:
+        for alpha in alpha_grid:
+            index = None
+            build_started = time.time()
+            try:
+                print(
+                    f">>> Construindo grafo Jasper: R={n_neighbors}, alpha={alpha}",
+                    flush=True,
+                )
+                index = _build_jasper_index(base, n_neighbors=n_neighbors, alpha=alpha)
+                torch.cuda.synchronize()
+                build_time = time.time() - build_started
+            except Exception as build_error:
+                build_time = time.time() - build_started
+                error = f"{type(build_error).__name__}: {build_error}"
+                for beam_width in beam_grid:
+                    trial_number += 1
+                    row = {
+                        "tentativa": trial_number, "n_neighbors": n_neighbors,
+                        "alpha": alpha, "beam_width": beam_width,
+                        "acertos": 0, "acuracia_pct": 0.0,
+                        "consultas": len(df2), "ids_validos": 0, "ids_unicos": 0,
+                        "build_time_s": build_time, "search_time_s": 0.0,
+                        "total_time_s": build_time, "status": "build_error", "erro": error,
+                    }
+                    append_csv(trials_path, pd.DataFrame([row]))
+                    print(
+                        f">>> [{trial_number}/{total_trials}] falhou ao construir R={n_neighbors}, "
+                        f"alpha={alpha}: {error}", flush=True,
+                    )
+                if index is not None:
+                    try:
+                        index.free()
+                    except Exception:
+                        pass
+                    del index
+                gc.collect()
+                torch.cuda.empty_cache()
+                continue
+
+            try:
+                for beam_width in beam_grid:
+                    trial_number += 1
+                    search_started = time.time()
+                    try:
+                        indices, scores = _search_jasper(
+                            index, query, k_eff, beam_width=beam_width
+                        )
+                        torch.cuda.synchronize()
+                        search_time = time.time() - search_started
+                        if indices.shape != (len(df2), k_eff):
+                            raise ValueError(
+                                f"Jasper retornou shape {indices.shape}; "
+                                f"esperado {(len(df2), k_eff)}."
+                            )
+
+                        first_ids = indices[:, 0]
+                        valid = (first_ids >= 0) & (first_ids < len(df1))
+                        valid_ids = first_ids[valid]
+                        query_labels = df2["setor_censitario"].to_numpy()[valid]
+                        base_labels = df1["setor_censitario"].to_numpy()[valid_ids]
+                        matches = int(np.count_nonzero(query_labels == base_labels))
+                        accuracy = matches / len(df2) * 100.0
+                        total_time = build_time + search_time
+                        row = {
+                            "tentativa": trial_number, "n_neighbors": n_neighbors,
+                            "alpha": alpha, "beam_width": beam_width,
+                            "acertos": matches, "acuracia_pct": accuracy,
+                            "consultas": len(df2), "ids_validos": int(valid.sum()),
+                            "ids_unicos": int(np.unique(valid_ids).size),
+                            "build_time_s": build_time, "search_time_s": search_time,
+                            "total_time_s": total_time, "status": "ok", "erro": "",
+                        }
+                        append_csv(trials_path, pd.DataFrame([row]))
+                        print(
+                            f">>> [{trial_number}/{total_trials}] R={n_neighbors}, alpha={alpha}, "
+                            f"beam={beam_width}: {matches}/{len(df2)} acertos "
+                            f"({accuracy:.2f}%), IDs válidos={int(valid.sum())}, "
+                            f"tempo busca={search_time:.1f}s",
+                            flush=True,
+                        )
+                        candidate_key = (matches, -total_time)
+                        if best_key is None or candidate_key > best_key:
+                            best_key = candidate_key
+                            best_result = row
+                            best_indices = indices.copy()
+                            best_scores = scores.copy()
+                    except Exception as search_error:
+                        error = f"{type(search_error).__name__}: {search_error}"
+                        row = {
+                            "tentativa": trial_number, "n_neighbors": n_neighbors,
+                            "alpha": alpha, "beam_width": beam_width,
+                            "acertos": 0, "acuracia_pct": 0.0,
+                            "consultas": len(df2), "ids_validos": 0, "ids_unicos": 0,
+                            "build_time_s": build_time,
+                            "search_time_s": time.time() - search_started,
+                            "total_time_s": time.time() - build_started,
+                            "status": "search_error", "erro": error,
+                        }
+                        append_csv(trials_path, pd.DataFrame([row]))
+                        print(
+                            f">>> [{trial_number}/{total_trials}] busca falhou para "
+                            f"R={n_neighbors}, alpha={alpha}, beam={beam_width}: {error}",
+                            flush=True,
+                        )
+            finally:
+                if index is not None:
+                    try:
+                        index.free()
+                    except Exception as free_error:
+                        print(f">>> Aviso ao liberar grafo Jasper: {free_error}", flush=True)
+                del index
+                gc.collect()
+                torch.cuda.empty_cache()
+
+    trials = pd.read_csv(trials_path) if os.path.exists(trials_path) else pd.DataFrame()
+    successful = trials[trials["status"] == "ok"].copy() if not trials.empty else trials
+    if successful.empty or best_result is None:
+        raise RuntimeError(
+            f"Nenhuma das {total_trials} configurações do Jasper foi concluída. "
+            f"Consulte {trials_path}."
+        )
+    ranked = successful.sort_values(
+        ["acertos", "total_time_s"], ascending=[False, True]
+    ).reset_index(drop=True)
+    ranked.to_csv(ranked_path, index=False)
+    best_indices_2d = np.asarray(best_indices).reshape(len(df2), k_eff)
+    best_scores_2d = np.asarray(best_scores).reshape(len(df2), k_eff)
+    valid_best = (best_indices_2d[:, 0] >= 0) & (best_indices_2d[:, 0] < len(df1))
+    best_matches = build_matches_global(
+        df1,
+        df2.iloc[np.flatnonzero(valid_best)].reset_index(drop=True),
+        best_indices_2d[valid_best],
+        k_eff,
+        suffixes,
+        best_scores_2d[valid_best],
+    )
+    best_matches.to_csv(best_path, index=False)
+    pd.DataFrame([best_result]).to_csv(best_config_path, index=False)
+    print(
+        ">>> Melhor configuração Jasper MiniLM: "
+        f"R={best_result['n_neighbors']}, alpha={best_result['alpha']}, "
+        f"beam={best_result['beam_width']}; {best_result['acertos']}/{best_result['consultas']} "
+        f"acertos ({best_result['acuracia_pct']:.2f}%).",
+        flush=True,
+    )
+    print(
+        f">>> Resultados: {trials_path}, {ranked_path}, {best_path}", flush=True
+    )
+    return best_matches
 
 
 def merge_knn_jasper_global(k, df1, df2, suffixes, model) -> DataFrame:
@@ -1985,7 +2234,7 @@ def _build_ggnn_index(embeddings: np.ndarray):
     if len(vectors) < 3:
         raise ValueError("GGNN precisa de pelo menos 3 vetores para construir o grafo.")
 
-    k_build = int(os.environ.get("GGNN_K_BUILD", "32"))
+    k_build = int(os.environ.get("GGNN_K_BUILD", "64"))
     if k_build < 2:
         raise ValueError("GGNN_K_BUILD deve ser maior ou igual a 2.")
     k_build = min(k_build, len(vectors) - 1)
@@ -1995,7 +2244,7 @@ def _build_ggnn_index(embeddings: np.ndarray):
     index.set_base(vectors)
     index.build(
         k_build=k_build,
-        tau_build=float(os.environ.get("GGNN_TAU_BUILD", "0.5")),
+        tau_build=float(os.environ.get("GGNN_TAU_BUILD", "0.7")),
         refinement_iterations=int(os.environ.get("GGNN_REFINEMENT_ITERATIONS", "2")),
         measure=ggnn.DistanceMeasure.Cosine,
     )
@@ -2003,15 +2252,21 @@ def _build_ggnn_index(embeddings: np.ndarray):
     return index
 
 
-def _search_ggnn(index, queries: np.ndarray, k: int):
-    """Query GGNN in bounded batches and return cosine similarities and ids."""
+def _search_ggnn(index, queries: np.ndarray, k: int, base_size: int):
+    """Query a wider GGNN candidate set, then return the requested top-k results."""
     import ggnn
 
     batch_size = int(os.environ.get("GGNN_QUERY_BATCH_SIZE", "4096"))
-    tau_query = float(os.environ.get("GGNN_TAU_QUERY", "0.64"))
-    max_iterations = int(os.environ.get("GGNN_MAX_ITERATIONS", "400"))
+    min_k_query = int(os.environ.get("GGNN_MIN_K_QUERY", "10"))
+    tau_query = float(os.environ.get("GGNN_TAU_QUERY", "1.0"))
+    max_iterations = int(os.environ.get("GGNN_MAX_ITERATIONS", "1000"))
     if batch_size < 1:
         raise ValueError("GGNN_QUERY_BATCH_SIZE deve ser maior que zero.")
+    if min_k_query < 1:
+        raise ValueError("GGNN_MIN_K_QUERY deve ser maior ou igual a 1.")
+    if base_size < 1:
+        raise ValueError("GGNN não pode consultar uma base vazia.")
+    search_k = min(max(k, min_k_query), base_size)
 
     all_indices, all_scores = [], []
     for start in range(0, len(queries), batch_size):
@@ -2020,16 +2275,16 @@ def _search_ggnn(index, queries: np.ndarray, k: int):
         )
         indices, distances = index.query(
             query_batch,
-            k_query=k,
+            k_query=search_k,
             tau_query=tau_query,
             max_iterations=max_iterations,
             measure=ggnn.DistanceMeasure.Cosine,
         )
         indices = np.asarray(indices, dtype=np.int64)
         distances = np.asarray(distances, dtype=np.float32)
-        all_indices.append(indices)
+        all_indices.append(indices[:, :k])
         # GGNN reports cosine distance (1 - cosine similarity).
-        all_scores.append(1.0 - distances)
+        all_scores.append(1.0 - distances[:, :k])
 
     if not all_indices:
         return np.empty((0, k), dtype=np.int64), np.empty((0, k), dtype=np.float32)
@@ -2092,7 +2347,7 @@ def merge_knn_ggnn_global(k, df1, df2, suffixes, model) -> DataFrame:
                 if index is None:
                     indices, scores = _search_ggnn_exact_small(base, query, k_eff)
                 else:
-                    indices, scores = _search_ggnn(index, query, k_eff)
+                    indices, scores = _search_ggnn(index, query, k_eff, len(base))
                 timings.append(time.time() - started)
             memories.append(search_monitor.peak_delta_mb)
     finally:
@@ -2163,7 +2418,7 @@ def merge_knn_ggnn(k, df1, df2, suffixes, model) -> DataFrame:
                     if index is None:
                         indices, scores = _search_ggnn_exact_small(base_mun, query_mun, k_eff)
                     else:
-                        indices, scores = _search_ggnn(index, query_mun, k_eff)
+                        indices, scores = _search_ggnn(index, query_mun, k_eff, len(base_mun))
                     elapsed = time.time() - started
                 times.append(elapsed)
                 memories.append(search_monitor.peak_delta_mb)

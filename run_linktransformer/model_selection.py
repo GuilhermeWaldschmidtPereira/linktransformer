@@ -92,11 +92,25 @@ def parse_embedding_model_args(
     if include_indexer:
         parser.add_argument(
             "--indexer",
-            choices=("both", "faiss", "svs", "cuhnsw", "jasper", "ggnn", "cagra"),
+            choices=("both", "faiss", "svs", "cuhnsw", "jasper", "jasper-tune", "ggnn", "cagra"),
             default="both",
-            help="Seleciona o indexador: ambos, FAISS, SVS, CUHNSW, Jasper, GGNN ou CAGRA.",
+            help=(
+                "Seleciona o indexador: ambos, FAISS, SVS, CUHNSW, Jasper, "
+                "varredura de tuning do Jasper, GGNN ou CAGRA."
+            ),
+        )
+        parser.add_argument(
+            "--repetitions",
+            type=int,
+            default=1,
+            help=(
+                "Repete a construção do índice e a consulta sem reler os CSVs "
+                "de entrada (padrão: 1)."
+            ),
         )
     args = parser.parse_args(argv)
     if args.k < 1:
         parser.error("--k deve ser um inteiro maior ou igual a 1")
+    if include_indexer and args.repetitions < 1:
+        parser.error("--repetitions deve ser um inteiro maior ou igual a 1")
     return args

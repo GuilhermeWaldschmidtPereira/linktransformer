@@ -1,0 +1,18 @@
+[
+  {
+    "model": "sentence-transformers/all-MiniLM-L6-v2",
+    "safe_model_name": "sentence-transformers_all-MiniLM-L6-v2",
+    "mode": "base",
+    "partition_size": 100000,
+    "num_partitions": 74,
+    "total_rows": 7353807,
+    "partition_dir": "/data/embeddings_partitions/sentence-transformers_all-MiniLM-L6-v2",
+    "elapsed_seconds": 10582.27625323087,
+    "elapsed_minutes": 176.37127088718117,
+    "memory_start_mb": 698.328125,
+    "memory_end_mb": 1479.6953125,
+    "memory_peak_mb": 1479.6953125,
+    "memory_delta_mb": 781.3671875,
+    "merged_path": "/data/embeddings_base_sentence-transformers_all-MiniLM-L6-v2.npy"
+  }
+]
