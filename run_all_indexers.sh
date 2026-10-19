@@ -15,16 +15,12 @@ mkdir -p "$ROOT/logs_nohup" "$ROOT/resultados_comparacao"
 run_one() {
     local model="$1"
     local indexer="$2"
-    local attempt="$3"
     local short="${model##*/}"
     local image
-    local attempt_label
     local results="/workspace/resultados_comparacao/$indexer/$short"
     local log
     local -a gpu_args=()
     local -a runtime_env=()
-
-    attempt_label="$(printf '%03d' "$attempt")"
 
     case "$indexer" in
         faiss)
@@ -46,17 +42,17 @@ run_one() {
             ;;
         *)
             printf '%s\tERRO(indexador_desconhecido)\t%s\t%s\t%s\n' \
-                "$(date '+%F %T')" "$indexer" "$model" "$attempt_label" \
+                "$(date '+%F %T')" "$indexer" "$model" "$REPETICOES" \
                 >> "$STATUS_LOG"
             return 2
             ;;
     esac
 
-    log="$ROOT/logs_nohup/${indexer}_${short}_run-${attempt_label}.log"
+    log="$ROOT/logs_nohup/${indexer}_${short}_repeticoes-${REPETICOES}.log"
     mkdir -p "$ROOT/resultados_comparacao/$indexer/$short"
 
-    printf '%s\tINICIO\t%s\t%s\t%s\n' \
-        "$(date '+%F %T')" "$indexer" "$model" "$attempt_label" \
+    printf '%s\tINICIO\t%s\t%s\t%s repeticoes\n' \
+        "$(date '+%F %T')" "$indexer" "$model" "$REPETICOES" \
         >> "$STATUS_LOG"
 
     if podman run --rm \
@@ -71,15 +67,16 @@ run_one() {
         "$image" \
         python /workspace/run_linktransformer/main_linktransformer.py \
             --scope geral --indexer "$indexer" --model "$model" --k 1 \
+            --repetitions "$REPETICOES" \
         > "$log" 2>&1
     then
-        printf '%s\tOK\t%s\t%s\t%s\n' \
-            "$(date '+%F %T')" "$indexer" "$model" "$attempt_label" \
+        printf '%s\tOK\t%s\t%s\t%s repeticoes\n' \
+            "$(date '+%F %T')" "$indexer" "$model" "$REPETICOES" \
             >> "$STATUS_LOG"
     else
         local status=$?
-        printf '%s\tERRO(%s)\t%s\t%s\t%s\n' \
-            "$(date '+%F %T')" "$status" "$indexer" "$model" "$attempt_label" \
+        printf '%s\tERRO(%s)\t%s\t%s\t%s repeticoes\n' \
+            "$(date '+%F %T')" "$status" "$indexer" "$model" "$REPETICOES" \
             >> "$STATUS_LOG"
     fi
 }
@@ -92,8 +89,6 @@ indexers=(faiss jasper ggnn cagra)
 
 for model in "${models[@]}"; do
     for indexer in "${indexers[@]}"; do
-        for ((attempt = 1; attempt <= REPETICOES; attempt++)); do
-            run_one "$model" "$indexer" "$attempt"
-        done
+        run_one "$model" "$indexer"
     done
 done

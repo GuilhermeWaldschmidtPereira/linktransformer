@@ -2,6 +2,7 @@
 import os
 import sys
 import traceback
+import gc
 from typing import List
 
 import numpy as np
@@ -188,44 +189,71 @@ def main() -> None:
         suffixes = ("_x", "_y")
 
         ks = [args.k]
+        failed_repetitions = 0
 
         for modelo in modelos_a_executar:
             print(f">>> Iniciando processamento do modelo: {modelo}", flush=True)
             assert_embeddings_exist(modelo, args.scope)
             df1, df2 = prepare_dataframes(df_base, df_query)
 
-            for k in ks:
-                print(f">>> Rodando LinkTransformer sem ScaNN | modelo={modelo} | k={k} | scope={args.scope}")
+            print(
+                f">>> Tamanhos dos dataframes: df1={len(df1)} linhas | df2={len(df2)} linhas",
+                flush=True,
+            )
+            for repetition in range(1, args.repetitions + 1):
                 print(
-                    f">>> Tamanhos dos dataframes: df1={len(df1)} linhas | df2={len(df2)} linhas",
+                    f">>> Repetição {repetition}/{args.repetitions}: "
+                    f"construindo índice e consultando | modelo={modelo} | indexador={args.indexer}",
                     flush=True,
                 )
-                if args.scope == "geral":
-                    if args.indexer in {"both", "faiss"}:
-                        merge_knn_global(k, df1, df2, suffixes, modelo)
-                    if args.indexer in {"both", "svs"}:
-                        merge_knn2_global(k, df1, df2, suffixes, modelo)
-                    if args.indexer == "cuhnsw":
-                        merge_knn_cuhnsw_global(k, df1, df2, suffixes, modelo)
-                    if args.indexer == "jasper":
-                        merge_knn_jasper_global(k, df1, df2, suffixes, modelo)
-                    if args.indexer == "ggnn":
-                        merge_knn_ggnn_global(k, df1, df2, suffixes, modelo)
-                    if args.indexer == "cagra":
-                        merge_knn_cagra_global(k, df1, df2, suffixes, modelo)
-                else:
-                    if args.indexer in {"both", "faiss"}:
-                        merge_knn(k, df1, df2, suffixes, modelo)
-                    if args.indexer in {"both", "svs"}:
-                        merge_knn2(k, df1, df2, suffixes, modelo)
-                    if args.indexer == "cuhnsw":
-                        merge_knn_cuhnsw(k, df1, df2, suffixes, modelo)
-                    if args.indexer == "jasper":
-                        merge_knn_jasper(k, df1, df2, suffixes, modelo)
-                    if args.indexer == "ggnn":
-                        merge_knn_ggnn(k, df1, df2, suffixes, modelo)
-                    if args.indexer == "cagra":
-                        merge_knn_cagra(k, df1, df2, suffixes, modelo)
+                try:
+                    for k in ks:
+                        print(
+                            f">>> Rodando LinkTransformer sem ScaNN | modelo={modelo} "
+                            f"| k={k} | scope={args.scope}",
+                            flush=True,
+                        )
+                        if args.scope == "geral":
+                            if args.indexer in {"both", "faiss"}:
+                                merge_knn_global(k, df1, df2, suffixes, modelo)
+                            if args.indexer in {"both", "svs"}:
+                                merge_knn2_global(k, df1, df2, suffixes, modelo)
+                            if args.indexer == "cuhnsw":
+                                merge_knn_cuhnsw_global(k, df1, df2, suffixes, modelo)
+                            if args.indexer == "jasper":
+                                merge_knn_jasper_global(k, df1, df2, suffixes, modelo)
+                            if args.indexer == "ggnn":
+                                merge_knn_ggnn_global(k, df1, df2, suffixes, modelo)
+                            if args.indexer == "cagra":
+                                merge_knn_cagra_global(k, df1, df2, suffixes, modelo)
+                        else:
+                            if args.indexer in {"both", "faiss"}:
+                                merge_knn(k, df1, df2, suffixes, modelo)
+                            if args.indexer in {"both", "svs"}:
+                                merge_knn2(k, df1, df2, suffixes, modelo)
+                            if args.indexer == "cuhnsw":
+                                merge_knn_cuhnsw(k, df1, df2, suffixes, modelo)
+                            if args.indexer == "jasper":
+                                merge_knn_jasper(k, df1, df2, suffixes, modelo)
+                            if args.indexer == "ggnn":
+                                merge_knn_ggnn(k, df1, df2, suffixes, modelo)
+                            if args.indexer == "cagra":
+                                merge_knn_cagra(k, df1, df2, suffixes, modelo)
+                except Exception as repetition_error:
+                    failed_repetitions += 1
+                    print(
+                        f">>> ERRO na repetição {repetition}/{args.repetitions}: "
+                        f"{type(repetition_error).__name__}: {repetition_error}",
+                        flush=True,
+                    )
+                    traceback.print_exc(file=sys.stdout)
+                finally:
+                    gc.collect()
+
+        if failed_repetitions:
+            raise RuntimeError(
+                f"{failed_repetitions} repetição(ões) falharam. Consulte os erros acima."
+            )
     except Exception as exc:
         print(f">>> ERRO em main_linktransformer.py: {type(exc).__name__}: {exc}", flush=True)
         traceback.print_exc(file=sys.stdout)

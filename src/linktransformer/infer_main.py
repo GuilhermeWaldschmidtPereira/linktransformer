@@ -3,6 +3,7 @@
 import json
 import os
 import warnings
+from functools import lru_cache
 import faiss
 import numpy as np
 import pandas as pd
@@ -264,7 +265,9 @@ def normalize_embeddings(embeddings: np.ndarray) -> np.ndarray:
     return embeddings / norms
 
 
+@lru_cache(maxsize=None)
 def load_global_embeddings(safe_model: str, normalize: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+    """Load global embeddings once per process so repeated index builds reuse them."""
     embeddings_base, embeddings_query = load_flat_embeddings(safe_model)
     if normalize:
         embeddings_base = normalize_embeddings(embeddings_base)
