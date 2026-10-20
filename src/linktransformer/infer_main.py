@@ -2,6 +2,7 @@
 ###We want to link dfs together using embeddings
 import json
 import os
+import sys
 import warnings
 from functools import lru_cache
 import faiss
@@ -1498,6 +1499,362 @@ def _release_cagra_resources() -> None:
     cp.get_default_pinned_memory_pool().free_all_blocks()
 
 
+def _load_pathweaver_extensions():
+    """Load PathWeaver's compiled modules from the workspace extension directory."""
+    import importlib
+
+    extension_dir = os.environ.get("PATHWEAVER_EXTENSION_DIR")
+    if not extension_dir:
+        extension_dir = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..", ".pathweaver", "extensions")
+        )
+    extension_dir = os.path.abspath(extension_dir)
+    if not os.path.isdir(extension_dir):
+        raise RuntimeError(
+            "Extensões PathWeaver não encontradas em "
+            f"{extension_dir}. Gere-as dentro da imagem CAGRA existente com "
+            "run_linktransformer/build_pathweaver_extensions.sh."
+        )
+    if extension_dir not in sys.path:
+        sys.path.insert(0, extension_dir)
+    try:
+        return tuple(
+            importlib.import_module(name)
+            for name in ("pathweaver", "cagra_wrapper", "cpu_generate_sign_bit")
+        )
+    except ImportError as exc:
+        raise RuntimeError(
+            "As extensões PathWeaver estão incompletas. Recompile-as com "
+            "run_linktransformer/build_pathweaver_extensions.sh usando a imagem CAGRA."
+        ) from exc
+
+
+def _pathweaver_memory_preflight(base: np.ndarray, graph_degree: int, intermediate_degree: int) -> None:
+    """Fail early if estimated build or resident search memory exceeds free VRAM."""
+    import torch
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("PathWeaver requer CUDA e uma GPU NVIDIA disponível.")
+    free_bytes, total_bytes = torch.cuda.mem_get_info()
+    base_bytes = int(base.nbytes)
+    build_graph_bytes = int(len(base) * intermediate_degree * np.dtype(np.uint32).itemsize)
+    search_graph_bytes = int(len(base) * graph_degree * np.dtype(np.uint32).itemsize)
+    sign_bit_bytes = int(len(base) * base.shape[1] * graph_degree / 8)
+    headroom_bytes = int(float(os.environ.get("PATHWEAVER_GPU_HEADROOM_GB", "1.5")) * (1024 ** 3))
+
+    # CAGRA construction needs temporary buffers in addition to the input and graph.
+    build_required = int(base_bytes * 1.25) + build_graph_bytes + headroom_bytes
+    resident_required = base_bytes + search_graph_bytes + sign_bit_bytes + headroom_bytes
+    required = max(build_required, resident_required)
+    print(
+        ">>> PathWeaver VRAM estimate: "
+        f"livre={free_bytes / (1024 ** 3):.2f} GiB/{total_bytes / (1024 ** 3):.2f} GiB, "
+        f"mínimo estimado={required / (1024 ** 3):.2f} GiB "
+        f"(dataset={base_bytes / (1024 ** 3):.2f}, "
+        f"sign-bits={sign_bit_bytes / (1024 ** 3):.2f}, "
+        f"folga={headroom_bytes / (1024 ** 3):.2f}).",
+        flush=True,
+    )
+    if free_bytes < required:
+        raise MemoryError(
+            "PathWeaver interrompido antes da alocação CUDA: a estimativa requer "
+            f"{required / (1024 ** 3):.2f} GiB livres, mas há "
+            f"{free_bytes / (1024 ** 3):.2f} GiB. O algoritmo mantém dataset, grafo "
+            "e sign-bits na GPU; reduza o tamanho da base ou libere VRAM."
+        )
+
+
+def _pathweaver_build_graph(cagra_module, cagra_instance, vectors: np.ndarray, graph_degree: int, intermediate_degree: int):
+    """Build one PathWeaver adjacency graph through its bundled CAGRA wrapper."""
+    params = cagra_module.IndexParams()
+    params.graph_degree = graph_degree
+    params.intermediate_graph_degree = intermediate_degree
+    graph = np.asarray(
+        cagra_instance.build(np.ascontiguousarray(vectors, dtype=np.float32), params),
+        dtype=np.uint32,
+    )
+    if graph.ndim != 2 or graph.shape[0] != len(vectors) or graph.shape[1] < 1:
+        raise RuntimeError(f"CAGRA retornou grafo PathWeaver com shape inválido: {graph.shape}.")
+    if graph.size and int(graph.max()) >= len(vectors):
+        raise RuntimeError("CAGRA retornou IDs fora do intervalo da base para PathWeaver.")
+    return np.ascontiguousarray(graph)
+
+
+def _pathweaver_shared_memory(dim: int, internal_topk: int, graph_degree: int) -> int:
+    result_size = internal_topk + graph_degree
+    return int(
+        (1 << 10) * 4
+        + dim * 4
+        + result_size * 4 * 2
+        + 1 * 4
+        + 2 * 4
+    )
+
+
+def _pathweaver_configs(
+    num_queries: int,
+    topk: int,
+    max_iter: int,
+    internal_topk: int,
+    dim: int,
+    dataset_size: int,
+    graph_degree: int,
+    prune_config: int,
+    iteration_prune_ratio: float,
+    neighbor_prune_ratio: float,
+    device,
+):
+    import torch
+
+    values = [
+        num_queries, topk, 1, max_iter, 0, internal_topk, dim, dataset_size,
+        8, graph_degree, 1, 32, 10, 16,
+        _pathweaver_shared_memory(dim, internal_topk, graph_degree),
+        prune_config, iteration_prune_ratio, neighbor_prune_ratio,
+        0, 0, 1, 1,
+    ]
+    return torch.tensor(values, dtype=torch.float32, device=device)
+
+
+def _pathweaver_query_batch(
+    pathweaver_module,
+    graph_device,
+    dataset_device,
+    sign_bit_device,
+    queries: np.ndarray,
+    seed_map_device,
+    initial_start_device,
+    output_k: int,
+    max_iter: int,
+    internal_topk: int,
+    prune_config: int,
+    iteration_prune_ratio: float,
+    neighbor_prune_ratio: float,
+    device,
+):
+    import torch
+
+    query_device = torch.from_numpy(np.ascontiguousarray(queries, dtype=np.float32)).to(device)
+    configs = _pathweaver_configs(
+        len(queries), output_k, max_iter, internal_topk, int(query_device.shape[1]),
+        int(dataset_device.shape[0]), int(graph_device.shape[1]), prune_config,
+        iteration_prune_ratio, neighbor_prune_ratio, device,
+    )
+    result_distances = torch.zeros((len(queries), output_k), dtype=torch.float32, device=device)
+    results = pathweaver_module.search(
+        graph_device,
+        dataset_device,
+        query_device,
+        initial_start_device,
+        seed_map_device,
+        sign_bit_device,
+        configs,
+        result_distances,
+    )
+    return results
+
+
+def _search_pathweaver(
+    pathweaver_module,
+    graph_device,
+    dataset_device,
+    sign_bit_device,
+    ghost_graph_device,
+    ghost_dataset_device,
+    queries: np.ndarray,
+    ghost_seed_map_device,
+    seed_map_device,
+    k: int,
+    graph_degree: int,
+    ghost_graph_degree: int,
+    device,
+) -> Tuple[np.ndarray, np.ndarray]:
+    import torch
+
+    batch_size = int(os.environ.get("PATHWEAVER_QUERY_BATCH_SIZE", "256"))
+    ghost_internal_topk = int(os.environ.get("PATHWEAVER_GHOST_INTERNAL_TOPK", "64"))
+    base_internal_topk = int(os.environ.get("PATHWEAVER_BASE_INTERNAL_TOPK", "64"))
+    ghost_max_iter = int(os.environ.get("PATHWEAVER_GHOST_MAX_ITER", "2"))
+    base_max_iter = int(os.environ.get("PATHWEAVER_BASE_MAX_ITER", "48"))
+    prune_config = int(os.environ.get("PATHWEAVER_PRUNE_CONFIG", "2"))
+    iteration_prune_ratio = float(os.environ.get("PATHWEAVER_ITERATION_PRUNE_RATIO", "0.6"))
+    neighbor_prune_ratio = float(os.environ.get("PATHWEAVER_NEIGHBOR_PRUNE_RATIO", "0.5"))
+    if batch_size < 1:
+        raise ValueError("PATHWEAVER_QUERY_BATCH_SIZE deve ser maior que zero.")
+    if ghost_internal_topk not in {64, 128} or base_internal_topk not in {64, 128}:
+        raise ValueError("PathWeaver aceita INTERNAL_TOPK igual a 64 ou 128.")
+    if prune_config not in {0, 1, 2}:
+        raise ValueError("PATHWEAVER_PRUNE_CONFIG deve ser 0, 1 ou 2.")
+    if k > base_internal_topk:
+        raise ValueError("k não pode exceder PATHWEAVER_BASE_INTERNAL_TOPK.")
+    if ghost_max_iter < 1 or base_max_iter < 1:
+        raise ValueError("PATHWEAVER_*_MAX_ITER precisa ser maior que zero.")
+    for name, ratio in (
+        ("PATHWEAVER_ITERATION_PRUNE_RATIO", iteration_prune_ratio),
+        ("PATHWEAVER_NEIGHBOR_PRUNE_RATIO", neighbor_prune_ratio),
+    ):
+        if not np.isfinite(ratio) or ratio < 0 or ratio > 1:
+            raise ValueError(f"{name} precisa estar entre 0 e 1.")
+    if abs(neighbor_prune_ratio * 8 - round(neighbor_prune_ratio * 8)) > 1e-6:
+        raise ValueError("PATHWEAVER_NEIGHBOR_PRUNE_RATIO deve ser múltiplo de 0.125.")
+
+    all_indices, all_scores = [], []
+    empty_sign_bits = torch.empty((0, 0), dtype=torch.uint32, device=device)
+    for start in range(0, len(queries), batch_size):
+        query_batch = queries[start:start + batch_size]
+        initial_start = torch.zeros((len(query_batch),), dtype=torch.uint32, device=device)
+        ghost_starts = _pathweaver_query_batch(
+            pathweaver_module, ghost_graph_device, ghost_dataset_device, empty_sign_bits,
+            query_batch, ghost_seed_map_device, initial_start, 1, ghost_max_iter,
+            ghost_internal_topk, 0, 1.0, 0.0, device,
+        )
+        batch_indices = _pathweaver_query_batch(
+            pathweaver_module, graph_device, dataset_device, sign_bit_device,
+            query_batch, seed_map_device, ghost_starts, k, base_max_iter,
+            base_internal_topk, prune_config, iteration_prune_ratio,
+            neighbor_prune_ratio, device,
+        )
+        indices = batch_indices.detach().cpu().numpy().astype(np.int64, copy=False)
+        if indices.shape != (len(query_batch), k):
+            raise RuntimeError(
+                f"PathWeaver retornou shape {indices.shape}; esperado {(len(query_batch), k)}."
+            )
+        if np.any(indices < 0) or np.any(indices >= len(dataset_device)):
+            raise RuntimeError("PathWeaver retornou IDs inválidos fora do intervalo da base.")
+        selected = dataset_device[batch_indices.long()].float()
+        scores = torch.sum(
+            selected * torch.from_numpy(np.ascontiguousarray(query_batch)).to(device).unsqueeze(1),
+            dim=2,
+        ).detach().cpu().numpy().astype(np.float32, copy=False)
+        all_indices.append(indices)
+        all_scores.append(scores)
+        del query_batch, initial_start, ghost_starts, batch_indices, selected, scores
+
+    if not all_indices:
+        return np.empty((0, k), dtype=np.int64), np.empty((0, k), dtype=np.float32)
+    return np.concatenate(all_indices), np.concatenate(all_scores)
+
+
+def _release_pathweaver_resources() -> None:
+    import gc
+    import torch
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+
+def merge_knn_pathweaver_global(k, df1, df2, suffixes, model) -> DataFrame:
+    """Run PathWeaver's CAGRA-seeded graph search for one global index."""
+    import torch
+
+    safe_model = safe_model_name(model)
+    base, query = load_global_embeddings(safe_model, normalize=True)
+    df1, df2 = df1.copy().reset_index(drop=True), df2.copy().reset_index(drop=True)
+    if len(base) != len(df1) or len(query) != len(df2):
+        raise ValueError(
+            "Quantidade de embeddings PathWeaver incompatível com os dataframes: "
+            f"base={len(base)}/{len(df1)}, query={len(query)}/{len(df2)}"
+        )
+    if len(base) < 2 or len(query) == 0:
+        raise ValueError("PathWeaver precisa de pelo menos 2 vetores base e 1 consulta.")
+    if base.ndim != 2 or query.ndim != 2 or base.shape[1] != query.shape[1]:
+        raise ValueError("Os embeddings PathWeaver precisam ser matrizes com a mesma dimensão.")
+    if base.shape[1] not in {384, 768}:
+        raise ValueError(
+            f"PathWeaver upstream não inclui kernels para dimensão {base.shape[1]}; "
+            "esta integração oferece kernels para 384 e 768 dimensões."
+        )
+    if not torch.cuda.is_available():
+        raise RuntimeError("PathWeaver requer uma instalação CUDA do PyTorch e uma GPU.")
+
+    graph_degree = int(os.environ.get("PATHWEAVER_GRAPH_DEGREE", "8"))
+    intermediate_degree = int(os.environ.get("PATHWEAVER_INTERMEDIATE_GRAPH_DEGREE", "16"))
+    ghost_scale = int(os.environ.get("PATHWEAVER_GHOST_SCALE_FACTOR", "100"))
+    if graph_degree < 1 or intermediate_degree < graph_degree:
+        raise ValueError(
+            "PATHWEAVER_GRAPH_DEGREE deve ser positivo e "
+            "PATHWEAVER_INTERMEDIATE_GRAPH_DEGREE deve ser maior ou igual."
+        )
+    if ghost_scale < 2:
+        raise ValueError("PATHWEAVER_GHOST_SCALE_FACTOR precisa ser maior ou igual a 2.")
+    _pathweaver_memory_preflight(base, graph_degree, intermediate_degree)
+    pathweaver_module, cagra_wrapper, sign_bit_module = _load_pathweaver_extensions()
+    k_eff = min(k, len(base))
+    device = torch.device("cuda:0")
+    ghost_size = min(len(base), max(2, len(base) // ghost_scale))
+    rng = np.random.default_rng(int(os.environ.get("PATHWEAVER_SEED", "777")))
+    ghost_ids = rng.choice(len(base), size=ghost_size, replace=False).astype(np.uint32)
+    ghost_data = np.ascontiguousarray(base[ghost_ids], dtype=np.float32)
+    index_time = 0.0
+    index_memory = 0.0
+    timings, memories = [], []
+    indices = scores = None
+    graph_device = dataset_device = sign_bit_device = None
+    ghost_graph_device = ghost_dataset_device = None
+
+    try:
+        with PeakMemoryMonitor() as index_monitor:
+            started = time.time()
+            wrapper = cagra_wrapper.CagraWrapper()
+            graph = _pathweaver_build_graph(
+                cagra_wrapper, wrapper, base, graph_degree, intermediate_degree
+            )
+            ghost_graph = _pathweaver_build_graph(
+                cagra_wrapper, wrapper, ghost_data, graph_degree, intermediate_degree
+            )
+            del wrapper
+            _release_pathweaver_resources()
+
+            base_cpu = torch.from_numpy(np.ascontiguousarray(base, dtype=np.float32))
+            graph_cpu = torch.from_numpy(graph)
+            sign_bit_cpu = sign_bit_module.generate_uint32_compressed(graph_cpu, base_cpu)
+            if not sign_bit_cpu.is_contiguous():
+                sign_bit_cpu = sign_bit_cpu.contiguous()
+            graph_device = graph_cpu.to(device)
+            dataset_device = base_cpu.to(device)
+            sign_bit_device = sign_bit_cpu.to(device)
+            ghost_graph_device = torch.from_numpy(ghost_graph).to(device)
+            ghost_dataset_device = torch.from_numpy(ghost_data).to(device)
+            ghost_seed_map_device = torch.arange(ghost_size, dtype=torch.uint32, device=device)
+            seed_map_device = torch.from_numpy(ghost_ids.copy()).to(device)
+            del base_cpu, graph_cpu, sign_bit_cpu, graph, ghost_graph, ghost_data
+            index_time = time.time() - started
+        index_memory = index_monitor.peak_delta_mb
+
+        for _ in range(NUM_EXECUCOES_BUSCA):
+            with PeakMemoryMonitor() as search_monitor:
+                started = time.time()
+                indices, scores = _search_pathweaver(
+                    pathweaver_module, graph_device, dataset_device, sign_bit_device,
+                    ghost_graph_device, ghost_dataset_device, query,
+                    ghost_seed_map_device, seed_map_device, k_eff,
+                    int(graph_device.shape[1]), int(ghost_graph_device.shape[1]), device,
+                )
+                torch.cuda.synchronize()
+                timings.append(time.time() - started)
+            memories.append(search_monitor.peak_delta_mb)
+    finally:
+        graph_device = dataset_device = sign_bit_device = None
+        ghost_graph_device = ghost_dataset_device = None
+        ghost_seed_map_device = seed_map_device = None
+        _release_pathweaver_resources()
+
+    matched = build_matches_global(df1, df2, indices, k_eff, suffixes, scores)
+    details = {
+        "execucao": list(range(1, NUM_EXECUCOES_BUSCA + 1)),
+        "tempo_busca": timings,
+        "memoria_usada_busca_MB": memories,
+    }
+    save_global_outputs(
+        "pathweaver", model, safe_model, df1, df2, len(base), k, index_time,
+        float(np.mean(timings)), index_memory, float(np.mean(memories)), details,
+        matched, "pathweaver", "pathweaver", "matched_pathweaver_global.csv",
+    )
+    return matched
+
+
 def merge_knn_cagra_global(k, df1, df2, suffixes, model) -> DataFrame:
     safe_model = safe_model_name(model)
     base, query = load_global_embeddings(safe_model, normalize=True)
@@ -1748,7 +2105,11 @@ def merge_knn_cuhnsw(k, df1, df2, suffixes, model) -> DataFrame:
     return matched
 
 
-def _build_jasper_index(embeddings: np.ndarray):
+def _build_jasper_index(
+    embeddings: np.ndarray,
+    n_neighbors: Optional[int] = None,
+    alpha: Optional[float] = None,
+):
     """Build Jasper's host-resident GPU graph from normalized cosine vectors."""
     import jasper
     import torch
@@ -1756,9 +2117,14 @@ def _build_jasper_index(embeddings: np.ndarray):
     if not torch.cuda.is_available():
         raise RuntimeError("Jasper requer uma instalação CUDA do PyTorch e uma GPU disponível.")
 
-    n_neighbors = int(os.environ.get("JASPER_N_NEIGHBORS", "64"))
-    if n_neighbors not in {8, 16, 32, 64}:
-        raise ValueError("JASPER_N_NEIGHBORS deve ser 8, 16, 32 ou 64.")
+    if n_neighbors is None:
+        n_neighbors = int(os.environ.get("JASPER_N_NEIGHBORS", "64"))
+    if n_neighbors < 1:
+        raise ValueError("JASPER_N_NEIGHBORS deve ser maior que zero.")
+    if alpha is None:
+        alpha = float(os.environ.get("JASPER_ALPHA", "1.2"))
+    if alpha < 1.0:
+        raise ValueError("JASPER_ALPHA deve ser maior ou igual a 1.0.")
 
     vectors_np = np.ascontiguousarray(embeddings, dtype=np.float16)
     vectors = torch.from_numpy(vectors_np).to(device="cuda", dtype=torch.float16)
@@ -1768,7 +2134,7 @@ def _build_jasper_index(embeddings: np.ndarray):
             vectors,
             n_neighbors=n_neighbors,
             distance="ip",
-            alpha=float(os.environ.get("JASPER_ALPHA", "1.2")),
+            alpha=alpha,
             workspace_budget=os.environ.get("JASPER_WORKSPACE_BUDGET", "4GB"),
             on_host=True,
         )
@@ -1779,12 +2145,19 @@ def _build_jasper_index(embeddings: np.ndarray):
         torch.cuda.empty_cache()
 
 
-def _search_jasper(index, queries: np.ndarray, k: int):
+def _search_jasper(
+    index,
+    queries: np.ndarray,
+    k: int,
+    beam_width: Optional[int] = None,
+):
     """Search Jasper in bounded batches and return cosine scores and ids."""
     import torch
 
     batch_size = int(os.environ.get("JASPER_QUERY_BATCH_SIZE", "8192"))
-    beam_width = max(int(os.environ.get("JASPER_BEAM_WIDTH", "128")), k)
+    if beam_width is None:
+        beam_width = int(os.environ.get("JASPER_BEAM_WIDTH", "128"))
+    beam_width = max(beam_width, k)
     if batch_size < 1:
         raise ValueError("JASPER_QUERY_BATCH_SIZE deve ser maior que zero.")
 
@@ -1823,6 +2196,229 @@ def _search_jasper_exact_small(base: np.ndarray, queries: np.ndarray, k: int):
     if not all_indices:
         return np.empty((0, k), dtype=np.int64), np.empty((0, k), dtype=np.float32)
     return np.concatenate(all_indices), np.concatenate(all_scores)
+
+
+def _parse_jasper_tuning_grid(env_name: str, default: str, cast):
+    raw_values = os.environ.get(env_name, default)
+    try:
+        values = [cast(value.strip()) for value in raw_values.split(",") if value.strip()]
+    except ValueError as exc:
+        raise ValueError(f"Valor inválido em {env_name}={raw_values!r}.") from exc
+    if not values:
+        raise ValueError(f"{env_name} precisa conter ao menos um valor.")
+    return list(dict.fromkeys(values))
+
+
+def tune_knn_jasper_global(k, df1, df2, suffixes, model) -> DataFrame:
+    """Sweep Jasper graph/search parameters and rank them by sector-label hits."""
+    import gc
+    import torch
+
+    if model != "sentence-transformers/all-MiniLM-L6-v2":
+        raise ValueError("A varredura Jasper desta versão aceita somente o MiniLM.")
+    if "setor_censitario" not in df1.columns or "setor_censitario" not in df2.columns:
+        raise ValueError("O tuning exige setor_censitario em base e query para medir acertos.")
+
+    neighbors_grid = _parse_jasper_tuning_grid("JASPER_TUNE_N_NEIGHBORS", "32,64,96,128", int)
+    alpha_grid = _parse_jasper_tuning_grid("JASPER_TUNE_ALPHAS", "1.0,1.2,1.4", float)
+    beam_grid = _parse_jasper_tuning_grid("JASPER_TUNE_BEAM_WIDTHS", "64,128,256,512", int)
+    if any(value < 1 for value in neighbors_grid):
+        raise ValueError("Todos os valores em JASPER_TUNE_N_NEIGHBORS devem ser positivos.")
+    if any(not np.isfinite(value) or value < 1.0 for value in alpha_grid):
+        raise ValueError("Todos os valores em JASPER_TUNE_ALPHAS devem ser finitos e >= 1.0.")
+    if any(value < k for value in beam_grid):
+        raise ValueError("Todos os valores em JASPER_TUNE_BEAM_WIDTHS devem ser >= k.")
+
+    safe_model = safe_model_name(model)
+    base, query = load_global_embeddings(safe_model, normalize=True)
+    df1 = df1.copy().reset_index(drop=True)
+    df2 = df2.copy().reset_index(drop=True)
+    if len(base) != len(df1) or len(query) != len(df2):
+        raise ValueError(
+            "Embeddings e CSVs têm quantidades diferentes de linhas: "
+            f"base {len(base)}/{len(df1)}, query {len(query)}/{len(df2)}."
+        )
+    if len(base) == 0 or len(query) == 0:
+        raise ValueError("A base e a query precisam conter ao menos uma linha.")
+
+    k_eff = min(k, len(base))
+    output_dir = PATH_RESULTADOS
+    trials_path = os.path.join(output_dir, "jasper_tuning_trials.csv")
+    ranked_path = os.path.join(output_dir, "jasper_tuning_ranked.csv")
+    best_path = os.path.join(output_dir, "jasper_tuning_best_matches.csv")
+    best_config_path = os.path.join(output_dir, "jasper_tuning_best_config.csv")
+    total_graphs = len(neighbors_grid) * len(alpha_grid)
+    total_trials = total_graphs * len(beam_grid)
+    trial_number = 0
+    best_key = None
+    best_result = None
+    best_indices = None
+    best_scores = None
+
+    if os.path.exists(trials_path):
+        raise FileExistsError(
+            f"Já existe uma varredura Jasper em {trials_path}. "
+            "Defina um LINKTRANSFORMER_RESULTS_DIR novo para preservar os resultados anteriores."
+        )
+
+    print(
+        ">>> Jasper tuning MiniLM: "
+        f"{len(neighbors_grid)} valores de R x {len(alpha_grid)} alphas x "
+        f"{len(beam_grid)} beams = {total_trials} tentativas "
+        f"({total_graphs} construções de grafo).",
+        flush=True,
+    )
+
+    for n_neighbors in neighbors_grid:
+        for alpha in alpha_grid:
+            index = None
+            build_started = time.time()
+            try:
+                print(
+                    f">>> Construindo grafo Jasper: R={n_neighbors}, alpha={alpha}",
+                    flush=True,
+                )
+                index = _build_jasper_index(base, n_neighbors=n_neighbors, alpha=alpha)
+                torch.cuda.synchronize()
+                build_time = time.time() - build_started
+            except Exception as build_error:
+                build_time = time.time() - build_started
+                error = f"{type(build_error).__name__}: {build_error}"
+                for beam_width in beam_grid:
+                    trial_number += 1
+                    row = {
+                        "tentativa": trial_number, "n_neighbors": n_neighbors,
+                        "alpha": alpha, "beam_width": beam_width,
+                        "acertos": 0, "acuracia_pct": 0.0,
+                        "consultas": len(df2), "ids_validos": 0, "ids_unicos": 0,
+                        "build_time_s": build_time, "search_time_s": 0.0,
+                        "total_time_s": build_time, "status": "build_error", "erro": error,
+                    }
+                    append_csv(trials_path, pd.DataFrame([row]))
+                    print(
+                        f">>> [{trial_number}/{total_trials}] falhou ao construir R={n_neighbors}, "
+                        f"alpha={alpha}: {error}", flush=True,
+                    )
+                if index is not None:
+                    try:
+                        index.free()
+                    except Exception:
+                        pass
+                    del index
+                gc.collect()
+                torch.cuda.empty_cache()
+                continue
+
+            try:
+                for beam_width in beam_grid:
+                    trial_number += 1
+                    search_started = time.time()
+                    try:
+                        indices, scores = _search_jasper(
+                            index, query, k_eff, beam_width=beam_width
+                        )
+                        torch.cuda.synchronize()
+                        search_time = time.time() - search_started
+                        if indices.shape != (len(df2), k_eff):
+                            raise ValueError(
+                                f"Jasper retornou shape {indices.shape}; "
+                                f"esperado {(len(df2), k_eff)}."
+                            )
+
+                        first_ids = indices[:, 0]
+                        valid = (first_ids >= 0) & (first_ids < len(df1))
+                        valid_ids = first_ids[valid]
+                        query_labels = df2["setor_censitario"].to_numpy()[valid]
+                        base_labels = df1["setor_censitario"].to_numpy()[valid_ids]
+                        matches = int(np.count_nonzero(query_labels == base_labels))
+                        accuracy = matches / len(df2) * 100.0
+                        total_time = build_time + search_time
+                        row = {
+                            "tentativa": trial_number, "n_neighbors": n_neighbors,
+                            "alpha": alpha, "beam_width": beam_width,
+                            "acertos": matches, "acuracia_pct": accuracy,
+                            "consultas": len(df2), "ids_validos": int(valid.sum()),
+                            "ids_unicos": int(np.unique(valid_ids).size),
+                            "build_time_s": build_time, "search_time_s": search_time,
+                            "total_time_s": total_time, "status": "ok", "erro": "",
+                        }
+                        append_csv(trials_path, pd.DataFrame([row]))
+                        print(
+                            f">>> [{trial_number}/{total_trials}] R={n_neighbors}, alpha={alpha}, "
+                            f"beam={beam_width}: {matches}/{len(df2)} acertos "
+                            f"({accuracy:.2f}%), IDs válidos={int(valid.sum())}, "
+                            f"tempo busca={search_time:.1f}s",
+                            flush=True,
+                        )
+                        candidate_key = (matches, -total_time)
+                        if best_key is None or candidate_key > best_key:
+                            best_key = candidate_key
+                            best_result = row
+                            best_indices = indices.copy()
+                            best_scores = scores.copy()
+                    except Exception as search_error:
+                        error = f"{type(search_error).__name__}: {search_error}"
+                        row = {
+                            "tentativa": trial_number, "n_neighbors": n_neighbors,
+                            "alpha": alpha, "beam_width": beam_width,
+                            "acertos": 0, "acuracia_pct": 0.0,
+                            "consultas": len(df2), "ids_validos": 0, "ids_unicos": 0,
+                            "build_time_s": build_time,
+                            "search_time_s": time.time() - search_started,
+                            "total_time_s": time.time() - build_started,
+                            "status": "search_error", "erro": error,
+                        }
+                        append_csv(trials_path, pd.DataFrame([row]))
+                        print(
+                            f">>> [{trial_number}/{total_trials}] busca falhou para "
+                            f"R={n_neighbors}, alpha={alpha}, beam={beam_width}: {error}",
+                            flush=True,
+                        )
+            finally:
+                if index is not None:
+                    try:
+                        index.free()
+                    except Exception as free_error:
+                        print(f">>> Aviso ao liberar grafo Jasper: {free_error}", flush=True)
+                del index
+                gc.collect()
+                torch.cuda.empty_cache()
+
+    trials = pd.read_csv(trials_path) if os.path.exists(trials_path) else pd.DataFrame()
+    successful = trials[trials["status"] == "ok"].copy() if not trials.empty else trials
+    if successful.empty or best_result is None:
+        raise RuntimeError(
+            f"Nenhuma das {total_trials} configurações do Jasper foi concluída. "
+            f"Consulte {trials_path}."
+        )
+    ranked = successful.sort_values(
+        ["acertos", "total_time_s"], ascending=[False, True]
+    ).reset_index(drop=True)
+    ranked.to_csv(ranked_path, index=False)
+    best_indices_2d = np.asarray(best_indices).reshape(len(df2), k_eff)
+    best_scores_2d = np.asarray(best_scores).reshape(len(df2), k_eff)
+    valid_best = (best_indices_2d[:, 0] >= 0) & (best_indices_2d[:, 0] < len(df1))
+    best_matches = build_matches_global(
+        df1,
+        df2.iloc[np.flatnonzero(valid_best)].reset_index(drop=True),
+        best_indices_2d[valid_best],
+        k_eff,
+        suffixes,
+        best_scores_2d[valid_best],
+    )
+    best_matches.to_csv(best_path, index=False)
+    pd.DataFrame([best_result]).to_csv(best_config_path, index=False)
+    print(
+        ">>> Melhor configuração Jasper MiniLM: "
+        f"R={best_result['n_neighbors']}, alpha={best_result['alpha']}, "
+        f"beam={best_result['beam_width']}; {best_result['acertos']}/{best_result['consultas']} "
+        f"acertos ({best_result['acuracia_pct']:.2f}%).",
+        flush=True,
+    )
+    print(
+        f">>> Resultados: {trials_path}, {ranked_path}, {best_path}", flush=True
+    )
+    return best_matches
 
 
 def merge_knn_jasper_global(k, df1, df2, suffixes, model) -> DataFrame:

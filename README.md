@@ -393,7 +393,54 @@ ajustados por variáveis de ambiente. `float32` e graus maiores aumentam o uso
 de memória; a memória de construção também depende dos buffers temporários do
 CAGRA.
 
-### 8. ScaNN
+### 8. PathWeaver
+
+PathWeaver está integrado ao escopo global e aceita embeddings de 384 dimensões
+(MiniLM) e 768 dimensões (MPNet). Ele constrói os grafos CAGRA de que precisa,
+gera os sign-bits e executa a busca em CUDA. A extensão é compilada no diretório
+ignorado `.pathweaver/`; não é necessário criar outra imagem. Use a imagem CAGRA
+já instalada:
+
+```bash
+podman run --rm \
+  --userns=keep-id \
+  --user "$(id -u):$(id -g)" \
+  -v "$PWD:/workspace:Z" \
+  -w /workspace \
+  localhost/projeto-mestrado-cagra:latest \
+  bash /workspace/run_linktransformer/build_pathweaver_extensions.sh
+```
+
+Depois de compilar, execute o indexador:
+
+```bash
+podman run --rm \
+  --userns=keep-id \
+  --user "$(id -u):$(id -g)" \
+  --device nvidia.com/gpu=1 \
+  -e LINKTRANSFORMER_DATA_DIR=/workspace/dados \
+  -e LINKTRANSFORMER_RESULTS_DIR=/workspace/resultados_pathweaver \
+  -e LD_LIBRARY_PATH=/opt/venv/lib/python3.10/site-packages/torch/lib:/workspace/.pathweaver/extensions:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64 \
+  -v "$PWD:/workspace:Z" \
+  -w /workspace \
+  localhost/projeto-mestrado-cagra:latest \
+  python /workspace/run_linktransformer/main_linktransformer.py \
+    --scope geral \
+    --indexer pathweaver \
+    --model sentence-transformers/all-MiniLM-L6-v2 \
+    --k 1
+```
+
+O upstream documenta uma configuração de referência com quatro GPUs de pelo
+menos 48 GB e NVLink. Esta integração adapta o fluxo single-GPU para o pipeline
+e interrompe a execução antes de alocar o índice se a estimativa de VRAM exceder
+a memória livre. O grafo, os vetores e os sign-bits ficam residentes na GPU; por
+isso, a base inteira precisa caber nela. Os graus padrão são 8 e 16. Ajuste
+`PATHWEAVER_GRAPH_DEGREE`, `PATHWEAVER_INTERMEDIATE_GRAPH_DEGREE`,
+`PATHWEAVER_GPU_HEADROOM_GB`, `PATHWEAVER_QUERY_BATCH_SIZE` e os parâmetros
+`PATHWEAVER_*_MAX_ITER` conforme a GPU e a carga.
+
+### 9. ScaNN
 
 Modo padrão, sem ajuste fino:
 

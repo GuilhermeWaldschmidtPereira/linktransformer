@@ -43,10 +43,12 @@ from linktransformer.infer_main import (  # noqa: E402
     merge_knn_cuhnsw_global,
     merge_knn_jasper,
     merge_knn_jasper_global,
+    tune_knn_jasper_global,
     merge_knn_ggnn,
     merge_knn_ggnn_global,
     merge_knn_cagra,
     merge_knn_cagra_global,
+    merge_knn_pathweaver_global,
 )
 from model_selection import (  # noqa: E402
     MODELOS_A_UTILIZAR,
@@ -178,6 +180,20 @@ def main() -> None:
     )
     modelos_a_executar = resolve_embedding_models(args.models)
 
+    if args.indexer == "jasper-tune":
+        minilm = "sentence-transformers/all-MiniLM-L6-v2"
+        if args.scope != "geral":
+            raise ValueError("O tuning do Jasper está disponível somente com --scope geral.")
+        if modelos_a_executar != [minilm]:
+            raise ValueError(
+                "O tuning do Jasper desta execução é exclusivo do MiniLM: "
+                "use --model sentence-transformers/all-MiniLM-L6-v2."
+            )
+        if args.repetitions != 1:
+            raise ValueError("Use --repetitions 1; cada execução do jasper-tune já varre toda a grade.")
+    if args.indexer == "pathweaver" and args.scope != "geral":
+        raise ValueError("PathWeaver está implementado somente com --scope geral.")
+
     print(f">>> Script em execução: {__file__}", flush=True)
     print(f">>> Modelos disponiveis: {MODELOS_A_UTILIZAR}", flush=True)
     print(f">>> Modelos selecionados: {modelos_a_executar}", flush=True)
@@ -222,10 +238,14 @@ def main() -> None:
                                 merge_knn_cuhnsw_global(k, df1, df2, suffixes, modelo)
                             if args.indexer == "jasper":
                                 merge_knn_jasper_global(k, df1, df2, suffixes, modelo)
+                            if args.indexer == "jasper-tune":
+                                tune_knn_jasper_global(k, df1, df2, suffixes, modelo)
                             if args.indexer == "ggnn":
                                 merge_knn_ggnn_global(k, df1, df2, suffixes, modelo)
                             if args.indexer == "cagra":
                                 merge_knn_cagra_global(k, df1, df2, suffixes, modelo)
+                            if args.indexer == "pathweaver":
+                                merge_knn_pathweaver_global(k, df1, df2, suffixes, modelo)
                         else:
                             if args.indexer in {"both", "faiss"}:
                                 merge_knn(k, df1, df2, suffixes, modelo)

@@ -31,6 +31,7 @@ venv/
 .venv_scann/
 .venv_plot_results/
 .venv*/
+.pathweaver/
 venv*/
 env/
 .env/

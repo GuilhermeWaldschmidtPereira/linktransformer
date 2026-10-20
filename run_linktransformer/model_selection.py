@@ -92,9 +92,15 @@ def parse_embedding_model_args(
     if include_indexer:
         parser.add_argument(
             "--indexer",
-            choices=("both", "faiss", "svs", "cuhnsw", "jasper", "ggnn", "cagra"),
+            choices=(
+                "both", "faiss", "svs", "cuhnsw", "jasper", "jasper-tune",
+                "ggnn", "cagra", "pathweaver",
+            ),
             default="both",
-            help="Seleciona o indexador: ambos, FAISS, SVS, CUHNSW, Jasper, GGNN ou CAGRA.",
+            help=(
+                "Seleciona o indexador: ambos, FAISS, SVS, CUHNSW, Jasper, "
+                "varredura de tuning do Jasper, GGNN, CAGRA ou PathWeaver."
+            ),
         )
         parser.add_argument(
             "--repetitions",
